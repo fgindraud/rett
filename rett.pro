@@ -2,6 +2,7 @@
 
 TEMPLATE = app
 CONFIG += c++11
+INCLUDEPATH += duck/
 
 CONFIG(release, debug|release): DEFINES += QT_NO_DEBUG_OUTPUT
 

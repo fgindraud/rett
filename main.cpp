@@ -16,6 +16,9 @@
  */
 #include <QApplication>
 
+#include <duck/range/range.h>
+#include <iostream>
+
 int main (int argc, char * argv[]) {
 	// Qt setup
 	QApplication app (argc, argv);
@@ -26,6 +29,10 @@ int main (int argc, char * argv[]) {
 	QCoreApplication::setApplicationVersion (STR (RETT_VERSION));
 #undef STR
 #undef XSTR
+
+	for (auto i : duck::range (42))
+		std::cout << i << ' ';
+	std::cout << '\n';
 
 	return app.exec ();
 }
