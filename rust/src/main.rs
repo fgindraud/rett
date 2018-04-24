@@ -1,86 +1,91 @@
+/* A vector of immutable indexed cells.
+ * Cells can be created and destroyed.
+ * After creation, cells are immutable.
+ * TODO iterable
+ */
+use std::ops::Index;
+enum ImmutableVectorCell<T> {
+    Used(T),
+    Unused, // TODO Pointer to next unused cell
+}
+struct ImmutableVector<T> {
+    cells: Vec<ImmutableVectorCell<T>>,
+    nb_elements: usize,
+}
+impl<T> ImmutableVector<T> {
+    fn new() -> ImmutableVector<T> {
+        ImmutableVector {
+            cells: Vec::new(),
+            nb_elements: 0,
+        }
+    }
+    fn insert(&mut self, value: T) -> usize {
+        let new_index = self.cells.len();
+        self.cells.push(ImmutableVectorCell::Used(value));
+        self.nb_elements += 1;
+        new_index
+    }
+    fn remove(&mut self, index: usize) {
+        self.cells[index] = ImmutableVectorCell::Unused;
+        self.nb_elements -= 1
+    }
+    fn len(&self) -> usize {
+        self.nb_elements
+    }
+}
+impl<T> Index<usize> for ImmutableVector<T> {
+    type Output = T;
+    fn index(&self, i: usize) -> &T {
+        match &self.cells[i] {
+            &ImmutableVectorCell::Used(ref v) => v,
+            _ => panic!("ImmutableVector::index({}): index is undefined", i),
+        }
+    }
+}
 
+// OLD test stuff
 enum Entity {
     Atom(String),
-    Link { from: i32, to: i32 },
+    Link { from: usize, to: usize },
 }
-struct IndexedEntityVector {
-    entities: Vec<Entity>,
-}
-
 impl Entity {
     fn atom(text: &str) -> Entity {
         Entity::Atom(String::from(text))
     }
-    fn link(from: i32, to: i32) -> Entity {
+    fn link(from: usize, to: usize) -> Entity {
         Entity::Link { from, to }
     }
 }
-impl IndexedEntityVector {
-    fn new() -> IndexedEntityVector {
-        IndexedEntityVector { entities: Vec::new() }
-    }
-    fn size(&self) -> i32 {
-        self.entities.len() as i32
-    }
-    fn create(&mut self, content: Entity) -> i32 {
-        let index: i32 = self.size();
-        self.entities.push(content);
-        index
-    }
-    fn entity(&self, index: i32) -> &Entity {
-        &self.entities[index as usize]
-    }
-}
-
-fn output_as_dot(iv: &IndexedEntityVector) {
+fn output_as_dot(iv: &ImmutableVector<Entity>) {
     println!("digraph {{");
-    for index in 0..iv.size() {
-        match iv.entity(index) {
+    for index in 0..iv.len() {
+        match &iv[index] {
             &Entity::Atom(ref s) => println!("\t{} [shape=box,label=\"{}\"];", index, s),
-            &Entity::Link { from, to } => println!("\t{} -> {} [label=\"{}\"];", from, to, index),
+            &Entity::Link { ref from, ref to } => {
+                println!("\t{} -> {} [label=\"{}\"];", from, to, index)
+            }
         }
     }
     println!("}}");
 }
 
 fn main() {
-    let mut iv = IndexedEntityVector::new();
-
+    let mut iv = ImmutableVector::new();
     // Catégories de personnes
-    let personnage = iv.create(Entity::atom("Personnage"));
-    let pj = iv.create(Entity::atom("PJ"));
-    iv.create(Entity::link(pj, personnage));
-    let pnj = iv.create(Entity::atom("PNJ"));
-    iv.create(Entity::link(pnj, personnage));
-
+    let personnage = iv.insert(Entity::atom("Personnage"));
+    let pj = iv.insert(Entity::atom("PJ"));
+    iv.insert(Entity::link(pj, personnage));
+    let pnj = iv.insert(Entity::atom("PNJ"));
+    iv.insert(Entity::link(pnj, personnage));
     // Liens entre personnes
-    let ami = iv.create(Entity::atom("Ami de"));
-    let ennemi = iv.create(Entity::atom("Ennemi de"));
-
+    let ami = iv.insert(Entity::atom("Ami de"));
+    let _ennemi = iv.insert(Entity::atom("Ennemi de"));
     // Quelques données
-    let joe = iv.create(Entity::atom("Joe"));
-    iv.create(Entity::link(joe, pj));
-    let alice = iv.create(Entity::atom("Alice"));
-    iv.create(Entity::link(alice, pnj));
-    let joe_ami_alice = iv.create(Entity::link(joe, alice));
-    iv.create(Entity::link(joe_ami_alice, ami));
-
-    /* Modèle pas trop mal.
-     * Il faudrait imposer que toute flèche soit taggée.
-     * ("est un", "inclus dans" pour les trucs basiques).
-     *
-     * Il faut un map Entity -> Index
-     *
-     * Affichage dot:
-     * Soit le truc actuel, passer par les index de liens.
-     * Soit labeller les liens avec les tags.
-     * Cas link -> link pertinent ? Ordonnancement de liens par exemple.
-     *
-     * Tester Queries ?
-     *
-     * Automatismes comme liens reflexifs / transitifs : niveau query ou lors de l'input du graph ?
-     *
-     */
-
+    let joe = iv.insert(Entity::atom("Joe"));
+    iv.insert(Entity::link(joe, pj));
+    let alice = iv.insert(Entity::atom("Alice"));
+    iv.insert(Entity::link(alice, pnj));
+    let joe_ami_alice = iv.insert(Entity::link(joe, alice));
+    iv.insert(Entity::link(joe_ami_alice, ami));
     output_as_dot(&iv);
 }
