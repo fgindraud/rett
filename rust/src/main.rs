@@ -1,9 +1,10 @@
 /* A vector of immutable indexed cells.
  * Cells can be created and destroyed.
  * After creation, cells are immutable.
- * TODO iterable
+ * TODO iterable: filter_map (enumerate ())
  */
 use std::ops::Index;
+use std::iter::IntoIterator;
 enum ImmutableVectorCell<T> {
     Used(T),
     Unused, // TODO Pointer to next unused cell
@@ -40,6 +41,13 @@ impl<T> Index<usize> for ImmutableVector<T> {
             &ImmutableVectorCell::Used(ref v) => v,
             _ => panic!("ImmutableVector::index({}): index is undefined", i),
         }
+    }
+}
+impl<T> IntoIterator for ImmutableVector<T> {
+    type Item = ImmutableVectorCell<T>;
+    type IntoIter = <Vec<ImmutableVectorCell<T>> as IntoIterator>::IntoIter;
+    fn into_iter(self) -> Self::IntoIter {
+        self.cells.into_iter()
     }
 }
 
