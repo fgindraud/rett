@@ -9,6 +9,14 @@ enum ImmutableVectorCell<T> {
     Used(T),
     Unused, // TODO Pointer to next unused cell
 }
+impl<T> ImmutableVectorCell<T> {
+    fn value(&self) -> Option<&T> {
+        match self {
+            &ImmutableVectorCell::Used(ref v) => Some(v),
+            _ => None,
+        }
+    }
+}
 struct ImmutableVector<T> {
     cells: Vec<ImmutableVectorCell<T>>,
     nb_elements: usize,
@@ -37,10 +45,7 @@ impl<T> ImmutableVector<T> {
 impl<T> Index<usize> for ImmutableVector<T> {
     type Output = T;
     fn index(&self, i: usize) -> &T {
-        match &self.cells[i] {
-            &ImmutableVectorCell::Used(ref v) => v,
-            _ => panic!("ImmutableVector::index({}): index is undefined", i),
-        }
+        self.cells[i].value().unwrap()
     }
 }
 impl<T> IntoIterator for ImmutableVector<T> {
