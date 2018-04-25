@@ -5,6 +5,7 @@
  */
 use std::ops::Index;
 use std::iter::IntoIterator;
+use std::iter::FilterMap;
 enum ImmutableVectorCell<T> {
     Used(T),
     Unused, // TODO Pointer to next unused cell
@@ -48,11 +49,16 @@ impl<T> Index<usize> for ImmutableVector<T> {
         self.cells[i].value().unwrap()
     }
 }
-impl<T> IntoIterator for ImmutableVector<T> {
-    type Item = ImmutableVectorCell<T>;
-    type IntoIter = <Vec<ImmutableVectorCell<T>> as IntoIterator>::IntoIter;
+impl<'a, T> IntoIterator for &'a ImmutableVector<T> {
+    type Item = &'a T;
+    type IntoIter = FilterMap<
+        <&'a Vec<ImmutableVectorCell<T>> as IntoIterator>::IntoIter,
+        fn(&'a ImmutableVectorCell<T>) -> Option<&'a T>,
+    >;
     fn into_iter(self) -> Self::IntoIter {
-        self.cells.into_iter()
+        self.cells
+            .into_iter()
+            .filter_map(ImmutableVectorCell::value)
     }
 }
 
