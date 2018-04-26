@@ -1,4 +1,5 @@
-/* A vector of immutable indexed cells.
+/*******************************************************************************
+ * A vector of immutable indexed cells.
  * Cells can be created and destroyed.
  * After creation, cells are immutable.
  * TODO iterable: filter_map (enumerate ())
@@ -66,7 +67,16 @@ impl<'a, T> std::iter::IntoIterator for &'a ImmutableVector<T> {
     }
 }
 
-// OLD test stuff
+/*******************************************************************************
+ * TODO new Element enum
+ * TODO file I/O
+ * TODO output as dot : (c, link{a, b}) : a => c => b with color code on arrows
+ * TODO queries, with hash map for referencing
+ */
+
+/*******************************************************************************
+ * OLD test stuff
+ */
 enum Entity {
     Atom(String),
     Link { from: usize, to: usize },
