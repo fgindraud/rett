@@ -3,9 +3,6 @@
  * After creation, cells are immutable.
  * TODO iterable: filter_map (enumerate ())
  */
-use std::ops::Index;
-use std::iter::IntoIterator;
-use std::iter::FilterMap;
 enum ImmutableVectorCell<T> {
     Used(T),
     Unused, // TODO Pointer to next unused cell
@@ -43,22 +40,18 @@ impl<T> ImmutableVector<T> {
         self.nb_elements
     }
 }
-impl<T> Index<usize> for ImmutableVector<T> {
+impl<T> std::ops::Index<usize> for ImmutableVector<T> {
     type Output = T;
     fn index(&self, i: usize) -> &T {
         self.cells[i].value().unwrap()
     }
 }
-impl<'a, T> IntoIterator for &'a ImmutableVector<T> {
-    type Item = &'a T;
-    type IntoIter = FilterMap<
-        <&'a Vec<ImmutableVectorCell<T>> as IntoIterator>::IntoIter,
-        fn(&'a ImmutableVectorCell<T>) -> Option<&'a T>,
-    >;
+impl<'a, T> std::iter::IntoIterator for &'a ImmutableVector<T> {
+    type Item = &'a ImmutableVectorCell<T>;
+    type IntoIter =
+        <&'a std::vec::Vec<ImmutableVectorCell<T>> as std::iter::IntoIterator>::IntoIter;
     fn into_iter(self) -> Self::IntoIter {
-        self.cells
-            .into_iter()
-            .filter_map(ImmutableVectorCell::value)
+        (&self.cells).into_iter()
     }
 }
 
