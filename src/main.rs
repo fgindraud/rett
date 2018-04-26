@@ -41,17 +41,23 @@ impl<T> ImmutableVector<T> {
     }
 }
 impl<T> std::ops::Index<usize> for ImmutableVector<T> {
+    // Index panics on empty cells
     type Output = T;
     fn index(&self, i: usize) -> &T {
         self.cells[i].value().unwrap()
     }
 }
 impl<'a, T> std::iter::IntoIterator for &'a ImmutableVector<T> {
-    type Item = &'a ImmutableVectorCell<T>;
-    type IntoIter =
-        <&'a std::vec::Vec<ImmutableVectorCell<T>> as std::iter::IntoIterator>::IntoIter;
+    // Iterator will iterate only on defined cells
+    type Item = &'a T;
+    type IntoIter = std::iter::FilterMap<
+        <&'a std::vec::Vec<ImmutableVectorCell<T>> as std::iter::IntoIterator>::IntoIter,
+        fn(&ImmutableVectorCell<T>) -> Option<&T>,
+    >;
     fn into_iter(self) -> Self::IntoIter {
-        (&self.cells).into_iter()
+        (&self.cells)
+            .into_iter()
+            .filter_map(ImmutableVectorCell::value)
     }
 }
 
@@ -100,4 +106,9 @@ fn main() {
     let joe_ami_alice = iv.insert(Entity::link(joe, alice));
     iv.insert(Entity::link(joe_ami_alice, ami));
     output_as_dot(&iv);
+
+    let mut i = 0;
+    for elem in &iv {
+        i += 1;
+    }
 }
