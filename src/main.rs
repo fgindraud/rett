@@ -49,15 +49,20 @@ impl<T> std::ops::Index<usize> for ImmutableVector<T> {
 }
 impl<'a, T> std::iter::IntoIterator for &'a ImmutableVector<T> {
     // Iterator will iterate only on defined cells
-    type Item = &'a T;
+    // It returns both index and reference to element
+    type Item = (usize, &'a T);
     type IntoIter = std::iter::FilterMap<
-        <&'a std::vec::Vec<ImmutableVectorCell<T>> as std::iter::IntoIterator>::IntoIter,
-        fn(&ImmutableVectorCell<T>) -> Option<&T>,
+        std::iter::Enumerate<std::slice::Iter<'a, ImmutableVectorCell<T>>>,
+        fn((usize, &ImmutableVectorCell<T>)) -> Option<(usize, &T)>,
     >;
     fn into_iter(self) -> Self::IntoIter {
-        (&self.cells)
-            .into_iter()
-            .filter_map(ImmutableVectorCell::value)
+        self.cells
+            .iter()
+            .enumerate()
+            .filter_map(|(i, ref v)| match v.value() {
+                Some(ref t) => Some((i, t)),
+                None => None,
+            })
     }
 }
 
@@ -76,8 +81,8 @@ impl Entity {
 }
 fn output_as_dot(iv: &ImmutableVector<Entity>) {
     println!("digraph {{");
-    for index in 0..iv.len() {
-        match &iv[index] {
+    for (index, elem) in iv {
+        match elem {
             &Entity::Atom(ref s) => println!("\t{} [shape=box,label=\"{}\"];", index, s),
             &Entity::Link { ref from, ref to } => {
                 println!("\t{} -> {} [label=\"{}\"];", from, to, index)
@@ -106,9 +111,4 @@ fn main() {
     let joe_ami_alice = iv.insert(Entity::link(joe, alice));
     iv.insert(Entity::link(joe_ami_alice, ami));
     output_as_dot(&iv);
-
-    let mut i = 0;
-    for elem in &iv {
-        i += 1;
-    }
 }
