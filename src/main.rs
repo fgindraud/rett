@@ -4,68 +4,72 @@
  * After creation, cells are immutable.
  * TODO iterable: filter_map (enumerate ())
  */
-enum ImmutableVectorCell<T> {
-    Used(T),
-    Unused, // TODO Pointer to next unused cell
-}
-impl<T> ImmutableVectorCell<T> {
-    fn value(&self) -> Option<&T> {
-        match self {
-            &ImmutableVectorCell::Used(ref v) => Some(v),
-            _ => None,
+mod immutable_vector {
+    pub enum ImmutableVectorCell<T> {
+        Used(T),
+        Unused, // TODO Pointer to next unused cell
+    }
+    impl<T> ImmutableVectorCell<T> {
+        fn value(&self) -> Option<&T> {
+            match self {
+                &ImmutableVectorCell::Used(ref v) => Some(v),
+                _ => None,
+            }
+        }
+    }
+    pub struct ImmutableVector<T> {
+        cells: Vec<ImmutableVectorCell<T>>,
+        nb_elements: usize,
+    }
+    impl<T> ImmutableVector<T> {
+        pub fn new() -> ImmutableVector<T> {
+            ImmutableVector {
+                cells: Vec::new(),
+                nb_elements: 0,
+            }
+        }
+        pub fn insert(&mut self, value: T) -> usize {
+            let new_index = self.cells.len();
+            self.cells.push(ImmutableVectorCell::Used(value));
+            self.nb_elements += 1;
+            new_index
+        }
+        pub fn remove(&mut self, index: usize) {
+            self.cells[index] = ImmutableVectorCell::Unused;
+            self.nb_elements -= 1
+        }
+        pub fn len(&self) -> usize {
+            self.nb_elements
+        }
+    }
+    impl<T> ::std::ops::Index<usize> for ImmutableVector<T> {
+        // Index panics on empty cells
+        type Output = T;
+        fn index(&self, i: usize) -> &T {
+            self.cells[i].value().unwrap()
+        }
+    }
+    impl<'a, T> ::std::iter::IntoIterator for &'a ImmutableVector<T> {
+        // Iterator will iterate only on defined cells
+        // It returns both index and reference to element
+        type Item = (usize, &'a T);
+        type IntoIter = ::std::iter::FilterMap<
+            ::std::iter::Enumerate<::std::slice::Iter<'a, ImmutableVectorCell<T>>>,
+            fn((usize, &ImmutableVectorCell<T>)) -> Option<(usize, &T)>,
+        >;
+        fn into_iter(self) -> Self::IntoIter {
+            self.cells
+                .iter()
+                .enumerate()
+                .filter_map(|(i, ref v)| match v.value() {
+                    Some(ref t) => Some((i, t)),
+                    None => None,
+                })
         }
     }
 }
-struct ImmutableVector<T> {
-    cells: Vec<ImmutableVectorCell<T>>,
-    nb_elements: usize,
-}
-impl<T> ImmutableVector<T> {
-    fn new() -> ImmutableVector<T> {
-        ImmutableVector {
-            cells: Vec::new(),
-            nb_elements: 0,
-        }
-    }
-    fn insert(&mut self, value: T) -> usize {
-        let new_index = self.cells.len();
-        self.cells.push(ImmutableVectorCell::Used(value));
-        self.nb_elements += 1;
-        new_index
-    }
-    fn remove(&mut self, index: usize) {
-        self.cells[index] = ImmutableVectorCell::Unused;
-        self.nb_elements -= 1
-    }
-    fn len(&self) -> usize {
-        self.nb_elements
-    }
-}
-impl<T> std::ops::Index<usize> for ImmutableVector<T> {
-    // Index panics on empty cells
-    type Output = T;
-    fn index(&self, i: usize) -> &T {
-        self.cells[i].value().unwrap()
-    }
-}
-impl<'a, T> std::iter::IntoIterator for &'a ImmutableVector<T> {
-    // Iterator will iterate only on defined cells
-    // It returns both index and reference to element
-    type Item = (usize, &'a T);
-    type IntoIter = std::iter::FilterMap<
-        std::iter::Enumerate<std::slice::Iter<'a, ImmutableVectorCell<T>>>,
-        fn((usize, &ImmutableVectorCell<T>)) -> Option<(usize, &T)>,
-    >;
-    fn into_iter(self) -> Self::IntoIter {
-        self.cells
-            .iter()
-            .enumerate()
-            .filter_map(|(i, ref v)| match v.value() {
-                Some(ref t) => Some((i, t)),
-                None => None,
-            })
-    }
-}
+
+use immutable_vector::ImmutableVector;
 
 /*******************************************************************************
  * TODO new Element enum
