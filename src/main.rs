@@ -5,20 +5,20 @@
  * TODO iterable: filter_map (enumerate ())
  */
 mod immutable_vector {
-    pub enum ImmutableVectorCell<T> {
+    pub enum Cell<T> {
         Used(T),
         Unused, // TODO Pointer to next unused cell
     }
-    impl<T> ImmutableVectorCell<T> {
+    impl<T> Cell<T> {
         fn value(&self) -> Option<&T> {
             match self {
-                &ImmutableVectorCell::Used(ref v) => Some(v),
+                &Cell::Used(ref v) => Some(v),
                 _ => None,
             }
         }
     }
     pub struct ImmutableVector<T> {
-        cells: Vec<ImmutableVectorCell<T>>,
+        cells: Vec<Cell<T>>,
         nb_elements: usize,
     }
     impl<T> ImmutableVector<T> {
@@ -30,32 +30,42 @@ mod immutable_vector {
         }
         pub fn insert(&mut self, value: T) -> usize {
             let new_index = self.cells.len();
-            self.cells.push(ImmutableVectorCell::Used(value));
+            self.cells.push(Cell::Used(value)); // TODO reuse existing if possible
             self.nb_elements += 1;
             new_index
         }
         pub fn remove(&mut self, index: usize) {
-            self.cells[index] = ImmutableVectorCell::Unused;
+            self.cells[index] = Cell::Unused; // TODO add to free list
             self.nb_elements -= 1
         }
         pub fn len(&self) -> usize {
             self.nb_elements
         }
+        pub fn cell(&self, index: usize) -> Option<&T> {
+            return self.cells[index].value();
+        }
+        // Iterator over all cells, returns (index: usize, elem_ref: Option<&T>)
+        pub fn cell_iter<'a>(
+            &'a self,
+        ) -> ::std::iter::Enumerate<
+            ::std::iter::Map<::std::slice::Iter<'a, Cell<T>>, fn(&Cell<T>) -> Option<&T>>,
+        > {
+            self.cells.iter().map(Cell::value as _).enumerate()
+        }
     }
     impl<T> ::std::ops::Index<usize> for ImmutableVector<T> {
         // Index panics on empty cells
         type Output = T;
-        fn index(&self, i: usize) -> &T {
-            self.cells[i].value().unwrap()
+        fn index(&self, index: usize) -> &T {
+            self.cell(index).unwrap()
         }
     }
     impl<'a, T> ::std::iter::IntoIterator for &'a ImmutableVector<T> {
-        // Iterator will iterate only on defined cells
-        // It returns both index and reference to element
+        // Iterator over non empty cells, returns (index: usize, elem_ref: &T)
         type Item = (usize, &'a T);
         type IntoIter = ::std::iter::FilterMap<
-            ::std::iter::Enumerate<::std::slice::Iter<'a, ImmutableVectorCell<T>>>,
-            fn((usize, &ImmutableVectorCell<T>)) -> Option<(usize, &T)>,
+            ::std::iter::Enumerate<::std::slice::Iter<'a, Cell<T>>>,
+            fn((usize, &Cell<T>)) -> Option<(usize, &T)>,
         >;
         fn into_iter(self) -> Self::IntoIter {
             self.cells
