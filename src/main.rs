@@ -82,7 +82,17 @@ mod immutable_vector {
 use immutable_vector::ImmutableVector;
 
 /*******************************************************************************
- * TODO new Element enum
+ */
+enum Atom {
+    String(String),
+}
+enum Object {
+    Atom(Atom),
+    Entity,
+    Link { from: usize, to: usize },
+}
+
+/*******************************************************************************
  * TODO file I/O
  * TODO output as dot : (c, link{a, b}) : a => c => b with color code on arrows
  * TODO queries, with hash map for referencing
