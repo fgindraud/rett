@@ -91,6 +91,30 @@ enum Object {
     Entity,
     Link { from: usize, to: usize },
 }
+struct Database {
+    objects: ImmutableVector<Object>,
+}
+
+impl Object {
+    fn text(text: &str) -> Object {
+        Object::Atom(Atom::String(String::from(text)))
+    }
+    fn link(from: usize, to: usize) -> Object {
+        Object::Link { from, to }
+    }
+}
+
+impl Database {
+    fn new() -> Database {
+        Database {
+            objects: ImmutableVector::new(),
+        }
+    }
+    fn insert(&mut self, object: Object) -> usize {
+        let id = self.objects.insert(object);
+        id
+    }
+}
 
 /*******************************************************************************
  * TODO file I/O
@@ -101,48 +125,39 @@ enum Object {
 /*******************************************************************************
  * OLD test stuff
  */
-enum Entity {
-    Atom(String),
-    Link { from: usize, to: usize },
-}
-impl Entity {
-    fn atom(text: &str) -> Entity {
-        Entity::Atom(String::from(text))
-    }
-    fn link(from: usize, to: usize) -> Entity {
-        Entity::Link { from, to }
-    }
-}
-fn output_as_dot(iv: &ImmutableVector<Entity>) {
+fn output_as_dot(iv: &ImmutableVector<Object>) {
     println!("digraph {{");
     for (index, elem) in iv {
         match elem {
-            &Entity::Atom(ref s) => println!("\t{} [shape=box,label=\"{}\"];", index, s),
-            &Entity::Link { ref from, ref to } => {
+            &Object::Atom(Atom::String(ref s)) => {
+                println!("\t{} [shape=box,label=\"{}\"];", index, s)
+            }
+            &Object::Link { ref from, ref to } => {
                 println!("\t{} -> {} [label=\"{}\"];", from, to, index)
             }
+            _ => {}
         }
     }
     println!("}}");
 }
 
 fn main() {
-    let mut iv = ImmutableVector::new();
+    let mut database = Database::new();
     // Catégories de personnes
-    let personnage = iv.insert(Entity::atom("Personnage"));
-    let pj = iv.insert(Entity::atom("PJ"));
-    iv.insert(Entity::link(pj, personnage));
-    let pnj = iv.insert(Entity::atom("PNJ"));
-    iv.insert(Entity::link(pnj, personnage));
+    let personnage = database.insert(Object::text("Personnage"));
+    let pj = database.insert(Object::text("PJ"));
+    database.insert(Object::link(pj, personnage));
+    let pnj = database.insert(Object::text("PNJ"));
+    database.insert(Object::link(pnj, personnage));
     // Liens entre personnes
-    let ami = iv.insert(Entity::atom("Ami de"));
-    let _ennemi = iv.insert(Entity::atom("Ennemi de"));
+    let ami = database.insert(Object::text("Ami de"));
+    let _ennemi = database.insert(Object::text("Ennemi de"));
     // Quelques données
-    let joe = iv.insert(Entity::atom("Joe"));
-    iv.insert(Entity::link(joe, pj));
-    let alice = iv.insert(Entity::atom("Alice"));
-    iv.insert(Entity::link(alice, pnj));
-    let joe_ami_alice = iv.insert(Entity::link(joe, alice));
-    iv.insert(Entity::link(joe_ami_alice, ami));
-    output_as_dot(&iv);
+    let joe = database.insert(Object::text("Joe"));
+    database.insert(Object::link(joe, pj));
+    let alice = database.insert(Object::text("Alice"));
+    database.insert(Object::link(alice, pnj));
+    let joe_ami_alice = database.insert(Object::link(joe, alice));
+    database.insert(Object::link(joe_ami_alice, ami));
+    output_as_dot(&database.objects);
 }
