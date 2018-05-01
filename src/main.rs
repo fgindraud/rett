@@ -1,3 +1,7 @@
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+
 /*******************************************************************************
  * A vector of immutable indexed cells.
  * Cells can be created and destroyed.
@@ -9,6 +13,11 @@ mod immutable_vector {
         Used(T),
         Unused, // TODO Pointer to next unused cell
     }
+    pub struct ImmutableVector<T> {
+        cells: Vec<Cell<T>>,
+        nb_elements: usize,
+    }
+
     impl<T> Cell<T> {
         fn value(&self) -> Option<&T> {
             match self {
@@ -17,10 +26,7 @@ mod immutable_vector {
             }
         }
     }
-    pub struct ImmutableVector<T> {
-        cells: Vec<Cell<T>>,
-        nb_elements: usize,
-    }
+
     impl<T> ImmutableVector<T> {
         pub fn new() -> ImmutableVector<T> {
             ImmutableVector {
@@ -41,16 +47,17 @@ mod immutable_vector {
         pub fn len(&self) -> usize {
             self.nb_elements
         }
+        pub fn capacity(&self) -> usize {
+            self.cells.len()
+        }
         pub fn cell(&self, index: usize) -> Option<&T> {
             return self.cells[index].value();
         }
-        // Iterator over all cells, returns (index: usize, elem_ref: Option<&T>)
+        // Iterator over all cells, returns elem_ref: Option<&T>
         pub fn cell_iter<'a>(
             &'a self,
-        ) -> ::std::iter::Enumerate<
-            ::std::iter::Map<::std::slice::Iter<'a, Cell<T>>, fn(&Cell<T>) -> Option<&T>>,
-        > {
-            self.cells.iter().map(Cell::value as _).enumerate()
+        ) -> ::std::iter::Map<::std::slice::Iter<'a, Cell<T>>, fn(&Cell<T>) -> Option<&T>> {
+            self.cells.iter().map(Cell::value as _)
         }
     }
     impl<T> ::std::ops::Index<usize> for ImmutableVector<T> {
@@ -77,15 +84,39 @@ mod immutable_vector {
                 })
         }
     }
+
+    /* Serialize / Deserialize.
+     * The vector is stored as an array of Option<T>.
+     * Unused cells are kept, to avoid complex id conversion if ids are used by user code.
+     */
+    impl<T> ::serde::Serialize for ImmutableVector<T>
+    where
+        T: ::serde::Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: ::serde::Serializer,
+        {
+            use serde::ser::SerializeSeq;
+            let mut seq = serializer.serialize_seq(Some(self.capacity()))?;
+            for elem_ref in self.cell_iter() {
+                seq.serialize_element(&elem_ref)?;
+            }
+            seq.end()
+        }
+    }
 }
 
 use immutable_vector::ImmutableVector;
 
 /*******************************************************************************
  */
+
+#[derive(Serialize, Deserialize)]
 enum Atom {
     String(String),
 }
+#[derive(Serialize, Deserialize)]
 enum Object {
     Atom(Atom),
     Entity,
@@ -116,8 +147,18 @@ impl Database {
     }
 }
 
+// Serialize / Deserialize: only export the array.
+impl ::serde::Serialize for Database {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ::serde::Serializer,
+    {
+        self.objects.serialize(serializer)
+    }
+}
+
 /*******************************************************************************
- * TODO file I/O
+ * TODO file input
  * TODO output as dot : (c, link{a, b}) : a => c => b with color code on arrows
  * TODO queries, with hash map for referencing
  */
