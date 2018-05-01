@@ -182,6 +182,8 @@ fn output_as_dot(iv: &ImmutableVector<Object>) {
     println!("}}");
 }
 
+extern crate serde_json;
+
 fn main() {
     let mut database = Database::new();
     // Catégories de personnes
@@ -201,4 +203,7 @@ fn main() {
     let joe_ami_alice = database.insert(Object::link(joe, alice));
     database.insert(Object::link(joe_ami_alice, ami));
     output_as_dot(&database.objects);
+
+    let serialized = serde_json::to_string(&database).unwrap();
+    println!("serialized = {}", serialized);
 }
