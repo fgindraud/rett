@@ -105,6 +105,63 @@ mod immutable_vector {
             seq.end()
         }
     }
+
+    impl<'de, T> ::serde::Deserialize<'de> for ImmutableVector<T>
+    where
+        T: ::serde::Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            // Define a type tag "Visitor" which packs operations
+            use std::marker::PhantomData;
+            struct SeqVisitor<T> {
+                marker: PhantomData<T>, // Rust complains if T not used in Visitor.
+            }
+
+            // Operations for this type tag
+            use std::fmt;
+            impl<'de, T> ::serde::de::Visitor<'de> for SeqVisitor<T>
+            where
+                T: ::serde::Deserialize<'de>,
+            {
+                type Value = ImmutableVector<T>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                    formatter.write_str("ImmutableVector<T>")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: ::serde::de::SeqAccess<'de>,
+                {
+                    let mut vector = ImmutableVector::new();
+
+                    while let Some(cell) = try!(seq.next_element()) {
+                        match cell {
+                            // Add values manually to prevent reuse of cells or such
+                            // TODO non pub "raw push" method ?
+                            Some(value) => {
+                                vector.cells.push(Cell::Used(value));
+                                vector.nb_elements += 1
+                            }
+                            None => vector.cells.push(Cell::Unused),
+                        }
+                    }
+
+                    Ok(vector)
+                }
+            }
+
+            // Deserializer for ImmutableVector<T>: use ops from type tag
+            let visitor = SeqVisitor {
+                marker: PhantomData,
+            };
+            deserializer.deserialize_seq(visitor)
+        }
+        // There is a deserialize_in_place stuff for Vec<T>, not implemented
+    }
 }
 
 use immutable_vector::ImmutableVector;
@@ -206,4 +263,8 @@ fn main() {
 
     let serialized = serde_json::to_string(&database).unwrap();
     println!("serialized = {}", serialized);
+
+    let deserialized: ImmutableVector<Object> = serde_json::from_str(&serialized).unwrap();
+    // TODO to Database, check if it worked
+    ()
 }
