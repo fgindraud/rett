@@ -8,12 +8,12 @@ extern crate serde_derive;
  * After creation, cells are immutable.
  * TODO iterable: filter_map (enumerate ())
  */
-mod immutable_vector {
+mod indexed_set {
     pub enum Cell<T> {
         Used(T),
         Unused, // TODO Pointer to next unused cell
     }
-    pub struct ImmutableVector<T> {
+    pub struct IndexedSet<T> {
         cells: Vec<Cell<T>>,
         nb_elements: usize,
     }
@@ -27,9 +27,9 @@ mod immutable_vector {
         }
     }
 
-    impl<T> ImmutableVector<T> {
-        pub fn new() -> ImmutableVector<T> {
-            ImmutableVector {
+    impl<T> IndexedSet<T> {
+        pub fn new() -> IndexedSet<T> {
+            IndexedSet {
                 cells: Vec::new(),
                 nb_elements: 0,
             }
@@ -60,14 +60,14 @@ mod immutable_vector {
             self.cells.iter().map(Cell::value as _)
         }
     }
-    impl<T> ::std::ops::Index<usize> for ImmutableVector<T> {
+    impl<T> ::std::ops::Index<usize> for IndexedSet<T> {
         // Index panics on empty cells
         type Output = T;
         fn index(&self, index: usize) -> &T {
             self.cell(index).unwrap()
         }
     }
-    impl<'a, T> ::std::iter::IntoIterator for &'a ImmutableVector<T> {
+    impl<'a, T> ::std::iter::IntoIterator for &'a IndexedSet<T> {
         // Iterator over non empty cells, returns (index: usize, elem_ref: &T)
         type Item = (usize, &'a T);
         type IntoIter = ::std::iter::FilterMap<
@@ -89,7 +89,7 @@ mod immutable_vector {
      * The vector is stored as an array of Option<T>.
      * Unused cells are kept, to avoid complex id conversion if ids are used by user code.
      */
-    impl<T> ::serde::Serialize for ImmutableVector<T>
+    impl<T> ::serde::Serialize for IndexedSet<T>
     where
         T: ::serde::Serialize,
     {
@@ -106,7 +106,7 @@ mod immutable_vector {
         }
     }
 
-    impl<'de, T> ::serde::Deserialize<'de> for ImmutableVector<T>
+    impl<'de, T> ::serde::Deserialize<'de> for IndexedSet<T>
     where
         T: ::serde::Deserialize<'de>,
     {
@@ -126,17 +126,17 @@ mod immutable_vector {
             where
                 T: ::serde::Deserialize<'de>,
             {
-                type Value = ImmutableVector<T>;
+                type Value = IndexedSet<T>;
 
                 fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                    formatter.write_str("ImmutableVector<T>")
+                    formatter.write_str("IndexedSet<T>")
                 }
 
                 fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
                 where
                     A: ::serde::de::SeqAccess<'de>,
                 {
-                    let mut vector = ImmutableVector::new();
+                    let mut vector = IndexedSet::new();
 
                     while let Some(cell) = try!(seq.next_element()) {
                         match cell {
@@ -154,7 +154,7 @@ mod immutable_vector {
                 }
             }
 
-            // Deserializer for ImmutableVector<T>: use ops from type tag
+            // Deserializer for IndexedSet<T>: use ops from type tag
             let visitor = SeqVisitor {
                 marker: PhantomData,
             };
@@ -164,7 +164,7 @@ mod immutable_vector {
     }
 }
 
-use immutable_vector::ImmutableVector;
+use indexed_set::IndexedSet;
 
 /*******************************************************************************
  */
@@ -180,7 +180,7 @@ enum Object {
     Link { from: usize, to: usize },
 }
 struct Database {
-    objects: ImmutableVector<Object>,
+    objects: IndexedSet<Object>,
 }
 
 impl Object {
@@ -195,7 +195,7 @@ impl Object {
 impl Database {
     fn new() -> Database {
         Database {
-            objects: ImmutableVector::new(),
+            objects: IndexedSet::new(),
         }
     }
     fn insert(&mut self, object: Object) -> usize {
@@ -223,7 +223,7 @@ impl ::serde::Serialize for Database {
 /*******************************************************************************
  * OLD test stuff
  */
-fn output_as_dot(iv: &ImmutableVector<Object>) {
+fn output_as_dot(iv: &IndexedSet<Object>) {
     println!("digraph {{");
     for (index, elem) in iv {
         match elem {
@@ -264,7 +264,7 @@ fn main() {
     let serialized = serde_json::to_string(&database).unwrap();
     println!("serialized = {}", serialized);
 
-    let deserialized: ImmutableVector<Object> = serde_json::from_str(&serialized).unwrap();
+    let deserialized: IndexedSet<Object> = serde_json::from_str(&serialized).unwrap();
     // TODO to Database, check if it worked
     ()
 }
