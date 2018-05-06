@@ -53,8 +53,19 @@ impl ::serde::Serialize for Database {
     }
 }
 
+impl<'de> ::serde::Deserialize<'de> for Database {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        match IndexedSet::<Object>::deserialize(deserializer) {
+            Ok(objects) => Ok(Database { objects: objects }),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 /*******************************************************************************
- * TODO file input
  * TODO output as dot : (c, link{a, b}) : a => c => b with color code on arrows
  * TODO queries, with hash map for referencing
  */
@@ -103,7 +114,7 @@ fn main() {
     let serialized = serde_json::to_string(&database).unwrap();
     println!("serialized = {}", serialized);
 
-    let deserialized: IndexedSet<Object> = serde_json::from_str(&serialized).unwrap();
+    let deserialized: Database = serde_json::from_str(&serialized).unwrap();
     // TODO to Database, check if it worked
-    ()
+    output_as_dot(&deserialized.objects)
 }
