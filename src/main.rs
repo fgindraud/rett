@@ -8,11 +8,11 @@ use indexed_set::IndexedSet;
 /*******************************************************************************
  */
 
-#[derive(Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize)]
 enum Atom {
     String(String),
 }
-#[derive(Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize)]
 enum Object {
     Atom(Atom),
     Entity,

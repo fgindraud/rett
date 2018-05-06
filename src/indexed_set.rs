@@ -1,15 +1,26 @@
+use std::hash::Hash;
+use std::collections::HashMap;
+
 /*******************************************************************************
  * A vector of immutable indexed cells.
  * Cells can be created and destroyed.
  * After creation, cells are immutable.
  * TODO iterable: filter_map (enumerate ())
  */
+
+pub trait IndexedSetCapableType: PartialEq + Eq + Hash {}
+impl<T: PartialEq + Eq + Hash> IndexedSetCapableType for T {}
+
 pub enum Cell<T> {
     Used(T),
     Unused, // TODO Pointer to next unused cell
 }
-pub struct IndexedSet<T> {
+pub struct IndexedSet<T>
+where
+    T: IndexedSetCapableType,
+{
     cells: Vec<Cell<T>>,
+    indexes: HashMap<T, usize>,
     nb_elements: usize,
 }
 
@@ -22,10 +33,14 @@ impl<T> Cell<T> {
     }
 }
 
-impl<T> IndexedSet<T> {
+impl<T> IndexedSet<T>
+where
+    T: IndexedSetCapableType,
+{
     pub fn new() -> IndexedSet<T> {
         IndexedSet {
             cells: Vec::new(),
+            indexes: HashMap::new(),
             nb_elements: 0,
         }
     }
@@ -55,14 +70,22 @@ impl<T> IndexedSet<T> {
         self.cells.iter().map(Cell::value as _)
     }
 }
-impl<T> ::std::ops::Index<usize> for IndexedSet<T> {
+
+impl<T> ::std::ops::Index<usize> for IndexedSet<T>
+where
+    T: IndexedSetCapableType,
+{
     // Index panics on empty cells
     type Output = T;
     fn index(&self, index: usize) -> &T {
         self.cell(index).unwrap()
     }
 }
-impl<'a, T> ::std::iter::IntoIterator for &'a IndexedSet<T> {
+
+impl<'a, T> ::std::iter::IntoIterator for &'a IndexedSet<T>
+where
+    T: IndexedSetCapableType,
+{
     // Iterator over non empty cells, returns (index: usize, elem_ref: &T)
     type Item = (usize, &'a T);
     type IntoIter = ::std::iter::FilterMap<
@@ -86,7 +109,7 @@ impl<'a, T> ::std::iter::IntoIterator for &'a IndexedSet<T> {
  */
 impl<T> ::serde::Serialize for IndexedSet<T>
 where
-    T: ::serde::Serialize,
+    T: ::serde::Serialize + IndexedSetCapableType,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -103,7 +126,7 @@ where
 
 impl<'de, T> ::serde::Deserialize<'de> for IndexedSet<T>
 where
-    T: ::serde::Deserialize<'de>,
+    T: ::serde::Deserialize<'de> + IndexedSetCapableType,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -119,7 +142,7 @@ where
         use std::fmt;
         impl<'de, T> ::serde::de::Visitor<'de> for SeqVisitor<T>
         where
-            T: ::serde::Deserialize<'de>,
+            T: ::serde::Deserialize<'de> + IndexedSetCapableType,
         {
             type Value = IndexedSet<T>;
 
