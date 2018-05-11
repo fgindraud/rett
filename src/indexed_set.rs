@@ -69,12 +69,6 @@ where
     pub fn cell(&self, index: usize) -> Option<&T> {
         return self.cells[index].value();
     }
-    // Iterator over all cells, returns elem_ref: Option<&T>
-    pub fn cell_iter<'a>(
-        &'a self,
-    ) -> ::std::iter::Map<::std::slice::Iter<'a, Cell<T>>, fn(&Cell<T>) -> Option<&T>> {
-        self.cells.iter().map(Cell::value as _)
-    }
 }
 
 impl<T> ::std::ops::Index<usize> for IndexedSet<T>
@@ -92,20 +86,11 @@ impl<'a, T> ::std::iter::IntoIterator for &'a IndexedSet<T>
 where
     T: IndexedSetCapableType,
 {
-    // Iterator over non empty cells, returns (index: usize, elem_ref: &T)
-    type Item = (usize, &'a T);
-    type IntoIter = ::std::iter::FilterMap<
-        ::std::iter::Enumerate<::std::slice::Iter<'a, Cell<T>>>,
-        fn((usize, &Cell<T>)) -> Option<(usize, &T)>,
-    >;
+    // Iterator over all cells, returns elem_ref: Option<&T>
+    type Item = Option<&'a T>;
+    type IntoIter = ::std::iter::Map<::std::slice::Iter<'a, Cell<T>>, fn(&Cell<T>) -> Option<&T>>;
     fn into_iter(self) -> Self::IntoIter {
-        self.cells
-            .iter()
-            .enumerate()
-            .filter_map(|(i, ref v)| match v.value() {
-                Some(ref t) => Some((i, t)),
-                None => None,
-            })
+        self.cells.iter().map(Cell::value as _)
     }
 }
 
@@ -123,7 +108,7 @@ where
     {
         use serde::ser::SerializeSeq;
         let mut seq = serializer.serialize_seq(Some(self.capacity()))?;
-        for elem_ref in self.cell_iter() {
+        for elem_ref in self {
             seq.serialize_element(&elem_ref)?;
         }
         seq.end()

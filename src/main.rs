@@ -75,15 +75,17 @@ impl<'de> ::serde::Deserialize<'de> for Database {
  */
 fn output_as_dot(iv: &IndexedSet<Object>) {
     println!("digraph {{");
-    for (index, elem) in iv {
-        match elem {
-            &Object::Atom(Atom::String(ref s)) => {
-                println!("\t{} [shape=box,label=\"{}\"];", index, s)
+    for (index, opt_elem) in iv.into_iter().enumerate() {
+        if let Some(elem) = opt_elem {
+            match elem {
+                &Object::Atom(Atom::String(ref s)) => {
+                    println!("\t{} [shape=box,label=\"{}\"];", index, s)
+                }
+                &Object::Link { ref from, ref to } => {
+                    println!("\t{} -> {} [label=\"{}\"];", from, to, index)
+                }
+                _ => {}
             }
-            &Object::Link { ref from, ref to } => {
-                println!("\t{} -> {} [label=\"{}\"];", from, to, index)
-            }
-            _ => {}
         }
     }
     println!("}}");
