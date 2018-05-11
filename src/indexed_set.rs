@@ -44,10 +44,16 @@ where
             nb_elements: 0,
         }
     }
+    fn push_new_entry(&mut self, value: T) {
+        self.cells.push(Cell::Used(value)); // TODO reuse existing if possible
+        self.nb_elements += 1
+    }
+    fn push_unused(&mut self) {
+        self.cells.push(Cell::Unused)
+    }
     pub fn insert(&mut self, value: T) -> usize {
         let new_index = self.cells.len();
-        self.cells.push(Cell::Used(value)); // TODO reuse existing if possible
-        self.nb_elements += 1;
+        self.push_new_entry(value);
         new_index
     }
     pub fn remove(&mut self, index: usize) {
@@ -159,12 +165,8 @@ where
                 while let Some(cell) = try!(seq.next_element()) {
                     match cell {
                         // Add values manually to prevent reuse of cells or such
-                        // TODO non pub "raw push" method ?
-                        Some(value) => {
-                            vector.cells.push(Cell::Used(value));
-                            vector.nb_elements += 1
-                        }
-                        None => vector.cells.push(Cell::Unused),
+                        Some(value) => vector.push_new_entry(value),
+                        None => vector.push_unused(),
                     }
                 }
 
