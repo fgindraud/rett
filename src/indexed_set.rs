@@ -1,5 +1,6 @@
 use std::hash::Hash;
 use std::collections::HashMap;
+use std::fmt;
 
 /*******************************************************************************
  * A vector of immutable indexed cells.
@@ -35,6 +36,11 @@ pub enum Cell<T> {
 impl Index {
     pub fn as_usize(&self) -> usize {
         self.0
+    }
+}
+impl fmt::Display for Index {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.as_usize().fmt(f)
     }
 }
 

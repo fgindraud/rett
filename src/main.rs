@@ -98,26 +98,18 @@ fn output_as_dot(db: &Database) {
     for (index, elem) in db.objects.into_iter() {
         match elem {
             &Object::Atom(Atom::String(ref s)) => {
-                println!(
-                    "\t{0} [shape=box,label=\"{0} = \\\"{1}\\\"\"];",
-                    index.as_usize(),
-                    s
-                );
+                println!("\t{0} [shape=box,label=\"{0} = \\\"{1}\\\"\"];", index, s);
             }
             &Object::Link(Link { ref from, ref to }) => {
                 println!(
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
-                    index.as_usize()
+                    index
                 );
-                println!(
-                    "\t{0} -> {1} [color=blue];",
-                    from.as_usize(),
-                    index.as_usize()
-                );
-                println!("\t{0} -> {1} [color=red];", index.as_usize(), to.as_usize());
+                println!("\t{0} -> {1} [color=blue];", from, index);
+                println!("\t{0} -> {1} [color=red];", index, to);
             }
             &Object::Entity(_) => {
-                println!("\t{0} [shape=box,label=\"{0}\"];", index.as_usize());
+                println!("\t{0} [shape=box,label=\"{0}\"];", index);
             }
         }
     }
