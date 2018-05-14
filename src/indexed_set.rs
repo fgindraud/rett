@@ -66,11 +66,6 @@ where
         self.nb_elements
     }
 
-    // Number of cells
-    pub fn capacity(&self) -> usize {
-        self.cells.len()
-    }
-
     // Access cell through index (if the index is in use)
     pub fn cell(&self, index: Index) -> Option<&T> {
         self.cells[index.as_usize()].value()
@@ -132,15 +127,24 @@ where
     }
 }
 
-// Iterator over all cells, returns elem_ref: Option<&T> FIXME version with (index, &T)
+// Iterator over all elements, returns (index, elem_ref)
 impl<'a, T> ::std::iter::IntoIterator for &'a IndexedSet<T>
 where
     T: IndexedSetCapableType,
 {
-    type Item = Option<&'a T>;
-    type IntoIter = ::std::iter::Map<::std::slice::Iter<'a, Cell<T>>, fn(&Cell<T>) -> Option<&T>>;
+    type Item = (Index, &'a T);
+    type IntoIter = ::std::iter::FilterMap<
+        ::std::iter::Enumerate<::std::slice::Iter<'a, Cell<T>>>,
+        fn((usize, &'a Cell<T>)) -> Option<Self::Item>,
+    >;
     fn into_iter(self) -> Self::IntoIter {
-        self.cells.iter().map(Cell::value as _)
+        self.cells
+            .iter()
+            .enumerate()
+            .filter_map(|(raw_index, ref cell)| match cell.value() {
+                Some(ref v) => Some((Index(raw_index), v)),
+                None => None,
+            })
     }
 }
 
@@ -158,9 +162,9 @@ where
         S: ::serde::Serializer,
     {
         use serde::ser::SerializeSeq;
-        let mut seq = serializer.serialize_seq(Some(self.capacity()))?;
-        for elem_ref in self {
-            seq.serialize_element(&elem_ref)?;
+        let mut seq = serializer.serialize_seq(Some(self.cells.len()))?;
+        for cell in &self.cells {
+            seq.serialize_element(&cell.value())?;
         }
         seq.end()
     }
@@ -230,7 +234,6 @@ mod tests {
     fn basic_api() {
         let mut is = super::IndexedSet::new();
         assert_eq!(is.len(), 0);
-        assert_eq!(is.capacity(), 0);
 
         let id_42 = is.insert(42);
         assert_eq!(is.index_of(&42), Some(id_42));

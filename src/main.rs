@@ -95,23 +95,29 @@ impl<'de> ::serde::Deserialize<'de> for Database {
  */
 fn output_as_dot(db: &Database) {
     println!("digraph {{");
-    for (index, opt_elem) in db.objects.into_iter().enumerate() {
-        if let Some(elem) = opt_elem {
-            match elem {
-                &Object::Atom(Atom::String(ref s)) => {
-                    println!("\t{0} [shape=box,label=\"{0} = \\\"{1}\\\"\"];", index, s);
-                }
-                &Object::Link(Link { ref from, ref to }) => {
-                    println!(
-                        "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
-                        index
-                    );
-                    println!("\t{0} -> {1} [color=blue];", from.as_usize(), index);
-                    println!("\t{0} -> {1} [color=red];", index, to.as_usize());
-                }
-                &Object::Entity(_) => {
-                    println!("\t{0} [shape=box,label=\"{0}\"];", index);
-                }
+    for (index, elem) in db.objects.into_iter() {
+        match elem {
+            &Object::Atom(Atom::String(ref s)) => {
+                println!(
+                    "\t{0} [shape=box,label=\"{0} = \\\"{1}\\\"\"];",
+                    index.as_usize(),
+                    s
+                );
+            }
+            &Object::Link(Link { ref from, ref to }) => {
+                println!(
+                    "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
+                    index.as_usize()
+                );
+                println!(
+                    "\t{0} -> {1} [color=blue];",
+                    from.as_usize(),
+                    index.as_usize()
+                );
+                println!("\t{0} -> {1} [color=red];", index.as_usize(), to.as_usize());
+            }
+            &Object::Entity(_) => {
+                println!("\t{0} [shape=box,label=\"{0}\"];", index.as_usize());
             }
         }
     }
@@ -148,8 +154,8 @@ fn main() {
     set_test_data(&mut database);
     output_as_dot(&database);
 
-    //    let serialized = serde_json::to_string(&database).unwrap();
-    //    println!("serialized = {}", serialized);
+    //let serialized = serde_json::to_string(&database).unwrap();
+    //println!("serialized = {}", serialized);
     //
     //    let deserialized: Database = serde_json::from_str(&serialized).unwrap();
     //    // TODO to Database, check if it worked
