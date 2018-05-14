@@ -102,10 +102,18 @@ impl<'de> ::serde::Deserialize<'de> for Database {
 /*******************************************************************************
  * Output as dot.
  */
-
 fn output_as_dot(objects: &IndexedSet<Object>) {
     use std::collections::HashMap;
     use std::cmp::{max, min};
+
+    /* Color palette for Link arrows in dot.
+     * Color palette selection is complicated.
+     * For now, use a fixed size palette, which should be sufficient as there are few conflicts.
+     */
+    let color_palette = [
+        "#332288", "#88CCEE", "#44AA99", "#117733", "#999933", "#DDCC77", "#CC6677", "#882255",
+        "#AA4499",
+    ];
 
     let link_color_indexes = {
         /* Link arrow color selection.
@@ -116,7 +124,7 @@ fn output_as_dot(objects: &IndexedSet<Object>) {
          *
          * Step 1: Determine the list of neighbor Links of each Link.
          * Step 2: Attribute a color index to each Link.
-         * Step 3: Select a color palette for the number of color indexes.
+         * Step 3: Select a color (currently, a fixed palette).
          *
          * The algorithm always does a pass through Links in increasing index order, for all steps.
          * Step 2 is a simple greedy algorithm:
@@ -171,12 +179,15 @@ fn output_as_dot(objects: &IndexedSet<Object>) {
             link_color_indexes.insert(id, color_index);
         }
 
+        // Step 3
+        assert!(
+            nb_colors <= color_palette.len(),
+            "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
+            nb_colors,
+            color_palette.len()
+        );
         link_color_indexes
-
-        // TODO Step 3
     };
-
-    let colors = ["red", "blue", "green"]; // FIXME temporary test palette !
 
     // Print graph
     use std::fmt;
@@ -199,9 +210,9 @@ fn output_as_dot(objects: &IndexedSet<Object>) {
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
                 );
-                let color = colors[link_color_indexes[&index]];
-                println!("\t{0} -> {1} [color={2}];", link.from, index, color);
-                println!("\t{0} -> {1} [color={2}];", index, link.to, color);
+                let color = color_palette[link_color_indexes[&index]];
+                println!("\t{0} -> {1} [color=\"{2}\"];", link.from, index, color);
+                println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
             }
             &Object::Entity(_) => {
                 println!("\t{0} [shape=box,label=\"{0}\"];", index);
