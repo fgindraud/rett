@@ -20,14 +20,12 @@ pub struct Index(usize);
 /* Contains a Vec<T> for direct indexing.
  * Also contains a Map<T, index>.
  */
-pub struct IndexedSet<T>
-where
-    T: IndexedSetCapableType,
-{
+pub struct IndexedSet<T> {
     cells: Vec<Cell<T>>,
     indexes: HashMap<T, Index>,
     nb_elements: usize,
 }
+
 // Each cell of the vector can be in use or unused.
 pub enum Cell<T> {
     Used(T),
@@ -134,7 +132,7 @@ where
     }
 }
 
-// Iterator over all cells, returns elem_ref: Option<&T>
+// Iterator over all cells, returns elem_ref: Option<&T> FIXME version with (index, &T)
 impl<'a, T> ::std::iter::IntoIterator for &'a IndexedSet<T>
 where
     T: IndexedSetCapableType,

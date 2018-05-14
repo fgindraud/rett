@@ -31,9 +31,6 @@ impl Object {
     fn text(text: &str) -> Object {
         Object::Atom(Atom::String(String::from(text)))
     }
-    fn link(from: DatabaseIndex, to: DatabaseIndex) -> Object {
-        Object::Link { from, to }
-    }
 }
 
 impl Database {
@@ -78,7 +75,7 @@ fn output_as_dot(db: &Database) {
         if let Some(elem) = opt_elem {
             match elem {
                 &Object::Atom(Atom::String(ref s)) => {
-                    println!("\t{0} [shape=box,label=\"{0}: {1}\"];", index, s);
+                    println!("\t{0} [shape=box,label=\"{0} = \\\"{1}\\\"\"];", index, s);
                 }
                 &Object::Link { ref from, ref to } => {
                     println!(
@@ -88,11 +85,13 @@ fn output_as_dot(db: &Database) {
                     println!("\t{0} -> {1} [color=blue];", from.as_usize(), index);
                     println!("\t{0} -> {1} [color=red];", index, to.as_usize());
                 }
-                _ => {} // TODO add entity
+                &Object::Entity => {
+                    println!("\t{0} [shape=box,label=\"{0}\"];", index);
+                }
             }
         }
     }
-    println!("}}"); // TODO update example
+    println!("}}");
 }
 
 /*******************************************************************************
@@ -100,32 +99,32 @@ fn output_as_dot(db: &Database) {
  */
 
 /*******************************************************************************
- * OLD test stuff
+ * Test
  */
 extern crate serde_json;
 
+fn create_named_entity(db: &mut Database, text: &str) -> DatabaseIndex {
+    let entity = db.insert(Object::Entity);
+    let atom = db.insert(Object::text(text));
+    let link = db.insert(Object::Link {
+        from: atom,
+        to: entity,
+    });
+    entity
+}
+
 fn set_test_data(db: &mut Database) {
-    let name_prop = db.insert(Object::Entity);
+    let name = create_named_entity(db, "name");
+    let joe = create_named_entity(db, "joe");
+    let bob = create_named_entity(db, "bob");
+    let win = create_named_entity(db, "win");
+    let joe_bob_fight = create_named_entity(db, "joe_bob_fight");
+    let was_present = create_named_entity(db, "was_present");
 }
 
 fn main() {
     let mut database = Database::new();
-    // Catégories de personnes
-    let personnage = database.insert(Object::text("Personnage"));
-    let pj = database.insert(Object::text("PJ"));
-    database.insert(Object::link(pj, personnage));
-    let pnj = database.insert(Object::text("PNJ"));
-    database.insert(Object::link(pnj, personnage));
-    // Liens entre personnes
-    let ami = database.insert(Object::text("Ami de"));
-    let _ennemi = database.insert(Object::text("Ennemi de"));
-    // Quelques données
-    let joe = database.insert(Object::text("Joe"));
-    database.insert(Object::link(joe, pj));
-    let alice = database.insert(Object::text("Alice"));
-    database.insert(Object::link(alice, pnj));
-    let joe_ami_alice = database.insert(Object::link(joe, alice));
-    database.insert(Object::link(joe_ami_alice, ami));
+    set_test_data(&mut database);
     output_as_dot(&database);
 
     //    let serialized = serde_json::to_string(&database).unwrap();
