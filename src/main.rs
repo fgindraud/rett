@@ -52,7 +52,6 @@ impl ::serde::Serialize for Database {
         self.objects.serialize(serializer)
     }
 }
-
 impl<'de> ::serde::Deserialize<'de> for Database {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -65,6 +64,31 @@ impl<'de> ::serde::Deserialize<'de> for Database {
     }
 }
 
+/* Output as dot.
+ */
+fn output_as_dot(db: &Database) {
+    println!("digraph {{");
+    for (index, opt_elem) in db.objects.into_iter().enumerate() {
+        if let Some(elem) = opt_elem {
+            match elem {
+                &Object::Atom(Atom::String(ref s)) => {
+                    println!("\t{0} [shape=box,label=\"{0}: {1}\"];", index, s);
+                }
+                &Object::Link { ref from, ref to } => {
+                    println!(
+                        "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
+                        index
+                    );
+                    println!("\t{0} -> {1} [color=blue];", from, index);
+                    println!("\t{0} -> {1} [color=red];", index, to);
+                }
+                _ => {} // TODO add entity
+            }
+        }
+    }
+    println!("}}");
+}
+
 /*******************************************************************************
  * TODO output as dot : (c, link{a, b}) : a => c => b with color code on arrows
  * TODO queries, with hash map for referencing
@@ -73,24 +97,6 @@ impl<'de> ::serde::Deserialize<'de> for Database {
 /*******************************************************************************
  * OLD test stuff
  */
-fn output_as_dot(iv: &IndexedSet<Object>) {
-    println!("digraph {{");
-    for (index, opt_elem) in iv.into_iter().enumerate() {
-        if let Some(elem) = opt_elem {
-            match elem {
-                &Object::Atom(Atom::String(ref s)) => {
-                    println!("\t{} [shape=box,label=\"{}\"];", index, s)
-                }
-                &Object::Link { ref from, ref to } => {
-                    println!("\t{} -> {} [label=\"{}\"];", from, to, index)
-                }
-                _ => {}
-            }
-        }
-    }
-    println!("}}");
-}
-
 extern crate serde_json;
 
 fn main() {
@@ -111,12 +117,12 @@ fn main() {
     database.insert(Object::link(alice, pnj));
     let joe_ami_alice = database.insert(Object::link(joe, alice));
     database.insert(Object::link(joe_ami_alice, ami));
-    output_as_dot(&database.objects);
+    output_as_dot(&database);
 
-    let serialized = serde_json::to_string(&database).unwrap();
-    println!("serialized = {}", serialized);
-
-    let deserialized: Database = serde_json::from_str(&serialized).unwrap();
-    // TODO to Database, check if it worked
-    output_as_dot(&deserialized.objects)
+    //    let serialized = serde_json::to_string(&database).unwrap();
+    //    println!("serialized = {}", serialized);
+    //
+    //    let deserialized: Database = serde_json::from_str(&serialized).unwrap();
+    //    // TODO to Database, check if it worked
+    //    output_as_dot(&deserialized.objects)
 }
