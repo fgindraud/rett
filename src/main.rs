@@ -8,11 +8,11 @@ use indexed_set::IndexedSet;
 /*******************************************************************************
  */
 
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 enum Atom {
     String(String),
 }
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 enum Object {
     Atom(Atom),
     Entity,
@@ -39,6 +39,7 @@ impl Database {
     }
     fn insert(&mut self, object: Object) -> usize {
         let id = self.objects.insert(object);
+        // TODO register in tables
         id
     }
 }
@@ -86,11 +87,10 @@ fn output_as_dot(db: &Database) {
             }
         }
     }
-    println!("}}");
+    println!("}}"); // TODO update example
 }
 
 /*******************************************************************************
- * TODO output as dot : (c, link{a, b}) : a => c => b with color code on arrows
  * TODO queries, with hash map for referencing
  */
 
@@ -98,6 +98,10 @@ fn output_as_dot(db: &Database) {
  * OLD test stuff
  */
 extern crate serde_json;
+
+fn set_test_data(db: &mut Database) {
+    let name_prop = db.insert(Object::Entity);
+}
 
 fn main() {
     let mut database = Database::new();
