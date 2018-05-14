@@ -136,7 +136,8 @@ where
     }
 }
 
-/* Serialize / Deserialize.
+/*******************************************************************************
+ * Serialize / Deserialize.
  * The vector is stored as an array of Option<T>.
  * Unused cells are kept, to avoid complex id conversion if ids are used by user code.
  */
@@ -210,4 +211,28 @@ where
         deserializer.deserialize_seq(visitor)
     }
     // There is a deserialize_in_place stuff for Vec<T>, not implemented
+}
+
+/*******************************************************************************
+ * Tests
+ */
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn basic_api() {
+        let mut is = super::IndexedSet::new();
+        assert_eq!(is.len(), 0);
+        assert_eq!(is.capacity(), 0);
+
+        let id_42 = is.insert(42);
+        assert_eq!(is.index_of(&42), Some(id_42));
+        assert_eq!(is.cell(id_42), Some(&42));
+        assert_eq!(is.len(), 1);
+
+        let id_42_b = is.insert(42);
+        let id_12 = is.insert(12);
+        assert_eq!(id_42, id_42_b);
+        assert_ne!(id_42, id_12);
+        assert_eq!(is.len(), 2);
+    }
 }
