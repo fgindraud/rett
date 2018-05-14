@@ -125,20 +125,43 @@ fn output_as_dot(db: &Database) {
  */
 extern crate serde_json;
 
-fn create_named_entity(db: &mut Database, text: &str) -> DatabaseIndex {
+fn create_name_prop(db: &mut Database) -> DatabaseIndex {
+    let name_entity = db.insert(Object::entity());
+    let name_text = db.insert(Object::text("name"));
+    let name_entity_description = db.insert(Object::link(name_text, name_entity));
+    let _name_entity_description_description =
+        db.insert(Object::link(name_entity, name_entity_description));
+    name_entity
+}
+
+fn create_named_entity(db: &mut Database, name_entity: DatabaseIndex, text: &str) -> DatabaseIndex {
     let entity = db.insert(Object::entity());
     let atom = db.insert(Object::text(text));
     let link = db.insert(Object::link(atom, entity));
+    let _link_description = db.insert(Object::link(name_entity, link));
     entity
 }
 
 fn set_test_data(db: &mut Database) {
-    let name = create_named_entity(db, "name");
-    let joe = create_named_entity(db, "joe");
-    let bob = create_named_entity(db, "bob");
-    let win = create_named_entity(db, "win");
-    let joe_bob_fight = create_named_entity(db, "joe_bob_fight");
-    let was_present = create_named_entity(db, "was_present");
+    let name = create_name_prop(db);
+
+    let joe = create_named_entity(db, name, "joe");
+    let bob = create_named_entity(db, name, "bob");
+
+    let pj = create_named_entity(db, name, "pj");
+    db.insert(Object::link(pj, joe));
+    db.insert(Object::link(pj, bob));
+
+    let fight = create_named_entity(db, name, "fight");
+    let joe_in_fight = db.insert(Object::link(joe, fight));
+    let bob_in_fight = db.insert(Object::link(bob, fight));
+
+    let was_present = create_named_entity(db, name, "was_present");
+    db.insert(Object::link(was_present, joe_in_fight));
+    db.insert(Object::link(was_present, bob_in_fight));
+
+    let win = create_named_entity(db, name, "win");
+    db.insert(Object::link(win, bob_in_fight));
 }
 
 fn main() {
