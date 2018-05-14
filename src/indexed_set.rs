@@ -83,7 +83,7 @@ where
         match self.index_of(&value) {
             Some(id) => id,
             None => self.push_new_entry(value),
-        } // TODO use Entry api
+        }
     }
 
     // Push an entry without checking if it is already defined; return new index.
@@ -91,7 +91,7 @@ where
         let new_index = self.cells.len();
         self.cells.push(Cell::Used(value.clone())); // TODO reuse existing cell if possible
         let previous_value = self.indexes.insert(value, new_index);
-        assert_eq!(previous_value, None);
+        debug_assert_eq!(previous_value, None);
         self.nb_elements += 1;
         new_index
     }
@@ -103,13 +103,13 @@ where
     // Remove object from the set through its id.
     // Does nothing if the index does not exist.
     pub fn remove_id(&mut self, index: usize) {
-        //        let cell = &mut self.cells[index];
-        //        if let &Cell::Used(ref v) = cell {
-        //            let previous_value = self.indexes.remove(v);
-        //            assert_eq!(previous_value, Some(index));
-        //            self.nb_elements -= 1
-        //        }
-        //        *cell = Cell::Unused; // TODO add to free list
+        let cell = &mut self.cells[index];
+        if let &mut Cell::Used(_) = cell {
+            self.nb_elements -= 1;
+            let previous_value = self.indexes.remove(cell.value().unwrap());
+            debug_assert_eq!(previous_value, Some(index));
+            *cell = Cell::Unused // TODO add to free list
+        }
     }
 }
 
@@ -227,6 +227,7 @@ mod tests {
         let id_42 = is.insert(42);
         assert_eq!(is.index_of(&42), Some(id_42));
         assert_eq!(is.cell(id_42), Some(&42));
+        assert_eq!(is[id_42], 42);
         assert_eq!(is.len(), 1);
 
         let id_42_b = is.insert(42);
@@ -234,5 +235,9 @@ mod tests {
         assert_eq!(id_42, id_42_b);
         assert_ne!(id_42, id_12);
         assert_eq!(is.len(), 2);
+
+        is.remove_id(id_42);
+        assert_eq!(is.len(), 1);
+        assert_eq!(is.cell(id_42), None);
     }
 }
