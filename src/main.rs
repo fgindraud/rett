@@ -107,7 +107,7 @@ fn output_as_dot(objects: &IndexedSet<Object>) {
     use std::collections::HashMap;
     use std::cmp::{max, min};
 
-    {
+    let link_color_indexes = {
         /* Link arrow color selection.
          *
          * This algorithm select different colors for Link arrows to improve readability.
@@ -171,8 +171,12 @@ fn output_as_dot(objects: &IndexedSet<Object>) {
             link_color_indexes.insert(id, color_index);
         }
 
+        link_color_indexes
+
         // TODO Step 3
-    }
+    };
+
+    let colors = ["red", "blue", "green"]; // FIXME temporary test palette !
 
     // Print graph
     use std::fmt;
@@ -195,8 +199,9 @@ fn output_as_dot(objects: &IndexedSet<Object>) {
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
                 );
-                println!("\t{0} -> {1} [color=blue];", link.from, index);
-                println!("\t{0} -> {1} [color=red];", index, link.to);
+                let color = colors[link_color_indexes[&index]];
+                println!("\t{0} -> {1} [color={2}];", link.from, index, color);
+                println!("\t{0} -> {1} [color={2}];", index, link.to, color);
             }
             &Object::Entity(_) => {
                 println!("\t{0} [shape=box,label=\"{0}\"];", index);
