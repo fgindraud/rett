@@ -2,6 +2,8 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
+use std::fmt;
+
 mod indexed_set;
 use indexed_set::IndexedSet;
 
@@ -14,6 +16,7 @@ type DatabaseIndex = indexed_set::Index;
 #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 enum Atom {
     String(String),
+    Integer(i32),
 }
 
 // Link: a directed arrow between two elements.
@@ -94,11 +97,19 @@ impl<'de> ::serde::Deserialize<'de> for Database {
 /* Output as dot.
  */
 fn output_as_dot(db: &Database) {
+    impl fmt::Display for Atom {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                &Atom::String(ref s) => write!(f, "\\\"{}\\\"", s),
+                &Atom::Integer(i) => i.fmt(f),
+            }
+        }
+    }
     println!("digraph {{");
     for (index, elem) in db.objects.into_iter() {
         match elem {
-            &Object::Atom(Atom::String(ref s)) => {
-                println!("\t{0} [shape=box,label=\"{0} = \\\"{1}\\\"\"];", index, s);
+            &Object::Atom(ref a) => {
+                println!("\t{0} [shape=box,label=\"{0} = {1}\"];", index, a);
             }
             &Object::Link(Link { ref from, ref to }) => {
                 println!(
@@ -162,6 +173,11 @@ fn set_test_data(db: &mut Database) {
 
     let win = create_named_entity(db, name, "win");
     db.insert(Object::link(win, bob_in_fight));
+
+    let date = create_named_entity(db, name, "date");
+    let some_date = db.insert(Object::Atom(Atom::Integer(2018)));
+    let fight_date = db.insert(Object::link(some_date, fight));
+    db.insert(Object::link(date, fight_date));
 }
 
 fn main() {
