@@ -7,6 +7,7 @@ use indexed_set::IndexedSet;
 
 /*******************************************************************************
  */
+type DatabaseIndex = indexed_set::Index;
 
 #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 enum Atom {
@@ -16,8 +17,12 @@ enum Atom {
 enum Object {
     Atom(Atom),
     Entity,
-    Link { from: usize, to: usize },
+    Link {
+        from: DatabaseIndex,
+        to: DatabaseIndex,
+    },
 }
+
 struct Database {
     objects: IndexedSet<Object>,
 }
@@ -26,7 +31,7 @@ impl Object {
     fn text(text: &str) -> Object {
         Object::Atom(Atom::String(String::from(text)))
     }
-    fn link(from: usize, to: usize) -> Object {
+    fn link(from: DatabaseIndex, to: DatabaseIndex) -> Object {
         Object::Link { from, to }
     }
 }
@@ -37,7 +42,7 @@ impl Database {
             objects: IndexedSet::new(),
         }
     }
-    fn insert(&mut self, object: Object) -> usize {
+    fn insert(&mut self, object: Object) -> DatabaseIndex {
         let id = self.objects.insert(object);
         // TODO register in tables
         id
@@ -80,8 +85,8 @@ fn output_as_dot(db: &Database) {
                         "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                         index
                     );
-                    println!("\t{0} -> {1} [color=blue];", from, index);
-                    println!("\t{0} -> {1} [color=red];", index, to);
+                    println!("\t{0} -> {1} [color=blue];", from.as_usize(), index);
+                    println!("\t{0} -> {1} [color=red];", index, to.as_usize());
                 }
                 _ => {} // TODO add entity
             }

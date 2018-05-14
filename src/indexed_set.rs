@@ -13,6 +13,10 @@ use std::collections::HashMap;
 pub trait IndexedSetCapableType: PartialEq + Eq + Hash + Clone {}
 impl<T: PartialEq + Eq + Hash + Clone> IndexedSetCapableType for T {}
 
+// Opaque index for IndexedSet.
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
+pub struct Index(usize);
+
 /* Contains a Vec<T> for direct indexing.
  * Also contains a Map<T, index>.
  */
@@ -21,7 +25,7 @@ where
     T: IndexedSetCapableType,
 {
     cells: Vec<Cell<T>>,
-    indexes: HashMap<T, usize>,
+    indexes: HashMap<T, Index>,
     nb_elements: usize,
 }
 // Each cell of the vector can be in use or unused.
@@ -30,12 +34,18 @@ pub enum Cell<T> {
     Unused, // TODO Pointer to next unused cell
 }
 
+impl Index {
+    pub fn as_usize(&self) -> usize {
+        self.0
+    }
+}
+
 impl<T> Cell<T> {
-    // Simple accessor
+    // Convert to Option<&T>, abstracting away the free list system.
     fn value(&self) -> Option<&T> {
         match self {
             &Cell::Used(ref v) => Some(v),
-            _ => None,
+            &Cell::Unused => None,
         }
     }
 }
@@ -64,12 +74,12 @@ where
     }
 
     // Access cell through index (if the index is in use)
-    pub fn cell(&self, index: usize) -> Option<&T> {
-        self.cells[index].value()
+    pub fn cell(&self, index: Index) -> Option<&T> {
+        self.cells[index.as_usize()].value()
     }
 
     // Get index of a value (if in the set)
-    pub fn index_of(&self, object: &T) -> Option<usize> {
+    pub fn index_of(&self, object: &T) -> Option<Index> {
         match self.indexes.get(object) {
             Some(i) => Some(*i),
             None => None,
@@ -79,7 +89,7 @@ where
     // Add a new element in the set.
     // Returns its index.
     // If the element already exists, return its current index instead.
-    pub fn insert(&mut self, value: T) -> usize {
+    pub fn insert(&mut self, value: T) -> Index {
         match self.index_of(&value) {
             Some(id) => id,
             None => self.push_new_entry(value),
@@ -87,8 +97,8 @@ where
     }
 
     // Push an entry without checking if it is already defined; return new index.
-    fn push_new_entry(&mut self, value: T) -> usize {
-        let new_index = self.cells.len();
+    fn push_new_entry(&mut self, value: T) -> Index {
+        let new_index = Index(self.cells.len());
         self.cells.push(Cell::Used(value.clone())); // TODO reuse existing cell if possible
         let previous_value = self.indexes.insert(value, new_index);
         debug_assert_eq!(previous_value, None);
@@ -102,8 +112,8 @@ where
 
     // Remove object from the set through its id.
     // Does nothing if the index does not exist.
-    pub fn remove_id(&mut self, index: usize) {
-        let cell = &mut self.cells[index];
+    pub fn remove_id(&mut self, index: Index) {
+        let cell = &mut self.cells[index.as_usize()];
         if let &mut Cell::Used(_) = cell {
             self.nb_elements -= 1;
             let previous_value = self.indexes.remove(cell.value().unwrap());
@@ -114,12 +124,12 @@ where
 }
 
 // Indexing operator: panics if the cell is unused
-impl<T> ::std::ops::Index<usize> for IndexedSet<T>
+impl<T> ::std::ops::Index<Index> for IndexedSet<T>
 where
     T: IndexedSetCapableType,
 {
     type Output = T;
-    fn index(&self, index: usize) -> &T {
+    fn index(&self, index: Index) -> &T {
         self.cell(index).unwrap()
     }
 }
