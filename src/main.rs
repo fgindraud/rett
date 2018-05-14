@@ -6,31 +6,55 @@ mod indexed_set;
 use indexed_set::IndexedSet;
 
 /*******************************************************************************
+ * Database
  */
 type DatabaseIndex = indexed_set::Index;
 
+// Atom: represents a basic piece of data (integer, string, etc)
 #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 enum Atom {
     String(String),
 }
+
+// Link: a directed arrow between two elements.
+#[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+struct Link {
+    from: DatabaseIndex,
+    to: DatabaseIndex,
+}
+
+// Entity: an abstract object, defined by its relations with others.
+// Cannot be compared with each other.
+#[derive(Eq, Hash, Clone, Serialize, Deserialize)]
+struct Entity;
+impl PartialEq for Entity {
+    fn eq(&self, _: &Entity) -> bool {
+        false
+    }
+}
+
+// Object: Sum type of the three above.
 #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 enum Object {
     Atom(Atom),
-    Entity,
-    Link {
-        from: DatabaseIndex,
-        to: DatabaseIndex,
-    },
+    Link(Link),
+    Entity(Entity),
+}
+impl Object {
+    // Nice constructors
+    fn text(text: &str) -> Object {
+        Object::Atom(Atom::String(String::from(text)))
+    }
+    fn link(from: DatabaseIndex, to: DatabaseIndex) -> Object {
+        Object::Link(Link { from: from, to: to })
+    }
+    fn entity() -> Object {
+        Object::Entity(Entity)
+    }
 }
 
 struct Database {
     objects: IndexedSet<Object>,
-}
-
-impl Object {
-    fn text(text: &str) -> Object {
-        Object::Atom(Atom::String(String::from(text)))
-    }
 }
 
 impl Database {
@@ -77,7 +101,7 @@ fn output_as_dot(db: &Database) {
                 &Object::Atom(Atom::String(ref s)) => {
                     println!("\t{0} [shape=box,label=\"{0} = \\\"{1}\\\"\"];", index, s);
                 }
-                &Object::Link { ref from, ref to } => {
+                &Object::Link(Link { ref from, ref to }) => {
                     println!(
                         "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                         index
@@ -85,7 +109,7 @@ fn output_as_dot(db: &Database) {
                     println!("\t{0} -> {1} [color=blue];", from.as_usize(), index);
                     println!("\t{0} -> {1} [color=red];", index, to.as_usize());
                 }
-                &Object::Entity => {
+                &Object::Entity(_) => {
                     println!("\t{0} [shape=box,label=\"{0}\"];", index);
                 }
             }
@@ -104,12 +128,9 @@ fn output_as_dot(db: &Database) {
 extern crate serde_json;
 
 fn create_named_entity(db: &mut Database, text: &str) -> DatabaseIndex {
-    let entity = db.insert(Object::Entity);
+    let entity = db.insert(Object::entity());
     let atom = db.insert(Object::text(text));
-    let link = db.insert(Object::Link {
-        from: atom,
-        to: entity,
-    });
+    let link = db.insert(Object::link(atom, entity));
     entity
 }
 
