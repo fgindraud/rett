@@ -15,7 +15,7 @@ pub trait IndexedSetCapableType: PartialEq + Eq + Hash + Clone {}
 impl<T: PartialEq + Eq + Hash + Clone> IndexedSetCapableType for T {}
 
 // Opaque index for IndexedSet.
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
 pub struct Index(usize);
 
 /* Contains a Vec<T> for direct indexing.
@@ -133,7 +133,8 @@ where
     }
 }
 
-// Iterator over all elements, returns (index, elem_ref)
+// Iterator over all elements, returns (index, elem_ref).
+// Indexes are in increasing order.
 impl<'a, T> ::std::iter::IntoIterator for &'a IndexedSet<T>
 where
     T: IndexedSetCapableType,

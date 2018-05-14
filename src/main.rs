@@ -2,8 +2,6 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
-use std::fmt;
-
 mod indexed_set;
 use indexed_set::IndexedSet;
 
@@ -54,6 +52,13 @@ impl Object {
     fn entity() -> Object {
         Object::Entity(Entity)
     }
+    // AAA
+    fn is_link(&self) -> bool {
+        match self {
+            &Object::Link(_) => true,
+            _ => false,
+        }
+    }
 }
 
 struct Database {
@@ -94,9 +99,83 @@ impl<'de> ::serde::Deserialize<'de> for Database {
     }
 }
 
-/* Output as dot.
+/*******************************************************************************
+ * Output as dot.
  */
-fn output_as_dot(db: &Database) {
+
+fn output_as_dot(objects: &IndexedSet<Object>) {
+    use std::collections::HashMap;
+    use std::cmp::{max, min};
+
+    {
+        /* Link arrow color selection.
+         *
+         * This algorithm select different colors for Link arrows to improve readability.
+         * The rule is to select different colors for Link that touch (descriptions).
+         * This is equivalent to coloring nodes of a graph of connected 'links'.
+         *
+         * Step 1: Determine the list of neighbor Links of each Link.
+         * Step 2: Attribute a color index to each Link.
+         * Step 3: Select a color palette for the number of color indexes.
+         *
+         * The algorithm always does a pass through Links in increasing index order, for all steps.
+         * Step 2 is a simple greedy algorithm:
+         * color (link) = min unused index among lower index link neighbors.
+         * Thus Step 1 only create a neighbor list of lower index neighbors.
+         */
+
+        // Step 1
+        let mut lower_index_neighbors = HashMap::new();
+        for (index, elem) in objects {
+            if let &Object::Link(ref link) = elem {
+                if objects[link.from].is_link() {
+                    lower_index_neighbors
+                        .entry(max(index, link.from))
+                        .or_insert(Vec::new())
+                        .push(min(index, link.from));
+                }
+                if objects[link.to].is_link() {
+                    lower_index_neighbors
+                        .entry(max(index, link.to))
+                        .or_insert(Vec::new())
+                        .push(min(index, link.to));
+                }
+            }
+        }
+        let lower_index_neighbors = lower_index_neighbors;
+
+        // Step 2
+        let mut nb_colors = 0;
+        let mut link_color_indexes = HashMap::new();
+        for id in objects
+            .into_iter()
+            .filter_map(|(id, ref elem)| if elem.is_link() { Some(id) } else { None })
+        {
+            let color_index = match lower_index_neighbors.get(&id) {
+                Some(ref link_neighbors) => {
+                    // Get colors of all neighbors of lower indexes
+                    let neighbour_color_indexes = link_neighbors
+                        .iter()
+                        .map(|n| link_color_indexes[n])
+                        .collect::<Vec<_>>();
+                    // Select first unused color index
+                    let mut color_index = 0;
+                    while neighbour_color_indexes.contains(&color_index) {
+                        color_index += 1
+                    }
+                    color_index
+                }
+                None => 0,
+            };
+            nb_colors = max(nb_colors, color_index + 1);
+            link_color_indexes.insert(id, color_index);
+        }
+
+        // TODO Step 3
+    }
+
+    // Print graph
+    use std::fmt;
     impl fmt::Display for Atom {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
@@ -106,18 +185,18 @@ fn output_as_dot(db: &Database) {
         }
     }
     println!("digraph {{");
-    for (index, elem) in db.objects.into_iter() {
+    for (index, elem) in objects {
         match elem {
             &Object::Atom(ref a) => {
                 println!("\t{0} [shape=box,label=\"{0} = {1}\"];", index, a);
             }
-            &Object::Link(Link { ref from, ref to }) => {
+            &Object::Link(ref link) => {
                 println!(
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
                 );
-                println!("\t{0} -> {1} [color=blue];", from, index);
-                println!("\t{0} -> {1} [color=red];", index, to);
+                println!("\t{0} -> {1} [color=blue];", link.from, index);
+                println!("\t{0} -> {1} [color=red];", index, link.to);
             }
             &Object::Entity(_) => {
                 println!("\t{0} [shape=box,label=\"{0}\"];", index);
@@ -183,7 +262,7 @@ fn set_test_data(db: &mut Database) {
 fn main() {
     let mut database = Database::new();
     set_test_data(&mut database);
-    output_as_dot(&database);
+    output_as_dot(&database.objects);
 
     //let serialized = serde_json::to_string(&database).unwrap();
     //println!("serialized = {}", serialized);
