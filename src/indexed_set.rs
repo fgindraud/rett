@@ -1,10 +1,13 @@
 use std::hash::Hash;
 use std::collections::HashMap;
 use std::fmt;
-use std::iter::{IntoIterator, Iterator};
+use std::iter;
+use std::ops;
 
 /*******************************************************************************
- * A vector of immutable indexed cells.
+ * A set of indexed objects of type T.
+ *
+ * TODO rename Cells to Slot
  * Cells can be created and destroyed.
  * Cells are unique.
  * After creation, cells are immutable.
@@ -73,23 +76,24 @@ where
         self.nb_elements
     }
 
-    // Number of cells (possible ids)
-    pub fn nb_cells(&self) -> usize {
+    // For every existing index, index.as_usize() < nb_indexes()
+    // Represent the size of the internal array.
+    // Indexes may not be valid !
+    pub fn nb_indexes(&self) -> usize {
         self.cells.len()
     }
 
     // Access cell through index (if the index is in use)
-    pub fn cell(&self, index: Index) -> Option<&T> {
+    pub fn get(&self, index: Index) -> Option<&T> {
         self.cells[index.as_usize()].value()
     }
 
     // Get index of a value (if in the set)
     pub fn index_of(&self, object: &T) -> Option<Index> {
-        match self.indexes.get(object) {
-            Some(i) => Some(*i),
-            None => None,
-        }
+        self.indexes.get(object).map(|i| *i)
     }
+
+    // Iterate on all indexes
 
     // Iterate on cells (may be empty)
     pub fn cell_iter<'a>(&'a self) -> CellIterator<'a, T> {
@@ -97,7 +101,7 @@ where
     }
 
     // TODO add iter() method
-    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
+    pub fn iter(&self) -> <&Self as iter::IntoIterator>::IntoIter {
         self.into_iter()
     }
 
@@ -139,13 +143,39 @@ where
 }
 
 // Indexing operator: panics if the cell is unused
-impl<T> ::std::ops::Index<Index> for IndexedSet<T>
+impl<T> ops::Index<Index> for IndexedSet<T>
 where
     T: IndexedSetCapableType,
 {
     type Output = T;
     fn index(&self, index: Index) -> &T {
         self.cell(index).unwrap()
+    }
+}
+
+// Iterator on indexes
+pub struct IndexIterator {
+    index: usize,
+    nb_cells: usize,
+}
+impl IndexIterator {
+    fn new(nb_cells: usize) -> Self {
+        IndexIterator {
+            index: 0,
+            nb_cells: nb_cells,
+        }
+    }
+}
+impl iter::Iterator for IndexIterator {
+    type Item = Index;
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_index = self.index;
+        self.index += 1;
+        if self.index <= self.nb_cells {
+            Some(Index(current_index))
+        } else {
+            None
+        }
     }
 }
 
@@ -162,7 +192,7 @@ impl<'a, T> CellIterator<'a, T> {
         }
     }
 }
-impl<'a, T> Iterator for CellIterator<'a, T> {
+impl<'a, T> iter::Iterator for CellIterator<'a, T> {
     type Item = (Index, Option<&'a T>);
     fn next(&mut self) -> Option<Self::Item> {
         let current_index = self.index;
@@ -177,13 +207,13 @@ impl<'a, T> Iterator for CellIterator<'a, T> {
 
 // Iterator over all elements, returns (index, elem_ref).
 // Indexes are in increasing order.
-impl<'a, T> IntoIterator for &'a IndexedSet<T>
+impl<'a, T> iter::IntoIterator for &'a IndexedSet<T>
 where
     T: IndexedSetCapableType,
 {
     type Item = (Index, &'a T);
-    type IntoIter = ::std::iter::FilterMap<
-        ::std::iter::Enumerate<::std::slice::Iter<'a, Cell<T>>>,
+    type IntoIter = iter::FilterMap<
+        iter::Enumerate<::std::slice::Iter<'a, Cell<T>>>,
         fn((usize, &'a Cell<T>)) -> Option<Self::Item>,
     >;
     fn into_iter(self) -> Self::IntoIter {
