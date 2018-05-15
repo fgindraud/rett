@@ -77,6 +77,12 @@ impl Database {
         id
     }
 }
+impl From<IndexedSet<Object>> for Database {
+    fn from(is: IndexedSet<Object>) -> Self {
+        Database { objects: is }
+        // TODO register in tables
+    }
+}
 
 // Serialize / Deserialize: only export the array.
 impl ::serde::Serialize for Database {
@@ -93,7 +99,7 @@ impl<'de> ::serde::Deserialize<'de> for Database {
         D: ::serde::Deserializer<'de>,
     {
         match IndexedSet::<Object>::deserialize(deserializer) {
-            Ok(objects) => Ok(Database { objects: objects }),
+            Ok(objects) => Ok(Database::from(objects)),
             Err(e) => Err(e),
         }
     }
