@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::collections::HashMap;
 use std::fmt;
+use std::iter::{IntoIterator, Iterator};
 
 /*******************************************************************************
  * A vector of immutable indexed cells.
@@ -72,6 +73,11 @@ where
         self.nb_elements
     }
 
+    // Number of cells (possible ids)
+    pub fn nb_cells(&self) -> usize {
+        self.cells.len()
+    }
+
     // Access cell through index (if the index is in use)
     pub fn cell(&self, index: Index) -> Option<&T> {
         self.cells[index.as_usize()].value()
@@ -83,6 +89,16 @@ where
             Some(i) => Some(*i),
             None => None,
         }
+    }
+
+    // Iterate on cells (may be empty)
+    pub fn cell_iter<'a>(&'a self) -> CellIterator<'a, T> {
+        CellIterator::new(&self.cells)
+    }
+
+    // TODO add iter() method
+    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
+        self.into_iter()
     }
 
     // Add a new element in the set.
@@ -133,9 +149,35 @@ where
     }
 }
 
+// Iterator on cells
+pub struct CellIterator<'a, T: 'a> {
+    cells: &'a Vec<Cell<T>>,
+    index: usize,
+}
+impl<'a, T> CellIterator<'a, T> {
+    fn new(cells: &'a Vec<Cell<T>>) -> Self {
+        CellIterator {
+            cells: cells,
+            index: 0,
+        }
+    }
+}
+impl<'a, T> Iterator for CellIterator<'a, T> {
+    type Item = (Index, Option<&'a T>);
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_index = self.index;
+        self.index += 1;
+        if self.index <= self.cells.len() {
+            Some((Index(current_index), self.cells[current_index].value()))
+        } else {
+            None
+        }
+    }
+}
+
 // Iterator over all elements, returns (index, elem_ref).
 // Indexes are in increasing order.
-impl<'a, T> ::std::iter::IntoIterator for &'a IndexedSet<T>
+impl<'a, T> IntoIterator for &'a IndexedSet<T>
 where
     T: IndexedSetCapableType,
 {

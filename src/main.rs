@@ -66,21 +66,28 @@ struct Database {
 }
 
 impl Database {
-    fn new() -> Database {
+    pub fn new() -> Database {
         Database {
             objects: IndexedSet::new(),
         }
     }
-    fn insert(&mut self, object: Object) -> DatabaseIndex {
+    pub fn insert(&mut self, object: Object) -> DatabaseIndex {
         let id = self.objects.insert(object);
-        // TODO register in tables
+        self.register(id);
         id
+    }
+
+    fn register(&mut self, new_object_id: DatabaseIndex) {
+        // TODO
     }
 }
 impl From<IndexedSet<Object>> for Database {
     fn from(is: IndexedSet<Object>) -> Self {
-        Database { objects: is }
-        // TODO register in tables
+        let mut db = Database { objects: is };
+        //for (id, _) in db.objects.iter() {
+        //    db.register(id);
+        //} FIXME
+        db
     }
 }
 
