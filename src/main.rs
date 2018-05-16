@@ -176,18 +176,23 @@ mod graph {
 
     /// Data for each object.
     /// In addition to the object, stored ids of links pointing from/to the object.
-    pub struct ObjectData<A> {
-        // FIXME pub
-        pub object: Object<A>, // FIXME pub
+    struct ObjectData<A> {
+        object: Object<A>,
         in_links: Vec<Index>,
         out_links: Vec<Index>,
     }
 
     /// Store a graph.
     pub struct Graph<A> {
-        pub objects: SlotVec<ObjectData<A>>, //FIXME pub
+        objects: SlotVec<ObjectData<A>>,
         atom_indexes: HashMap<A, Index>,
         link_indexes: HashMap<Link, Index>,
+    }
+
+    /// Reference an object and its data
+    pub struct ObjectRef<'a, A: 'a> {
+        index: Index,
+        object_data: &'a ObjectData<A>,
     }
 
     impl Index {
@@ -207,6 +212,15 @@ mod graph {
         }
     }
 
+    impl<'a, A> ObjectRef<'a, A> {
+        pub fn index(&self) -> Index {
+            self.index
+        }
+        pub fn object(&self) -> &'a Object<A> {
+            &self.object_data.object
+        }
+    }
+
     impl<A: Eq + Hash + Clone> Graph<A> {
         /// Create a new empty graph.
         pub fn new() -> Self {
@@ -215,6 +229,16 @@ mod graph {
                 atom_indexes: HashMap::new(),
                 link_indexes: HashMap::new(),
             }
+        }
+
+        /// Get object
+        pub fn object<'a>(&'a self, index: Index) -> Option<ObjectRef<'a, A>> {
+            self.objects
+                .get(index.to_usize())
+                .map(|object_data| ObjectRef {
+                    index: index,
+                    object_data: object_data,
+                })
         }
 
         /// Get index of an atom, or None if not found.
@@ -263,6 +287,14 @@ mod graph {
         pub fn insert_entity(&mut self) -> Index {
             Index(self.objects.insert(ObjectData::new(Object::Entity(Entity))))
         }
+    }
+
+    // FIXME tmp
+    pub fn make_index(i: usize) -> Index {
+        Index(i)
+    }
+    pub fn max_index<A>(g: &Graph<A>) -> usize {
+        g.objects.nb_slots()
     }
 }
 
@@ -358,13 +390,13 @@ fn output_as_dot(g: &Graph) {
         }
     }
     println!("digraph {{");
-    for index in 0..g.objects.nb_slots() {
-        if let Some(object_data) = g.objects.get(index) {
-            match object_data.object {
-                Object::Atom(ref a) => {
+    for index in 0..graph::max_index(&g) {
+        if let Some(object_data) = g.object(graph::make_index(index)) {
+            match object_data.object() {
+                &Object::Atom(ref a) => {
                     println!("\t{0} [shape=box,label=\"{0} = {1}\"];", index, a);
                 }
-                Object::Link(ref link) => {
+                &Object::Link(ref link) => {
                     println!(
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
@@ -373,7 +405,7 @@ fn output_as_dot(g: &Graph) {
                     println!("\t{0} -> {1} [color=\"{2}\"];", link.from, index, color);
                     println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
                 }
-                Object::Entity(_) => {
+                &Object::Entity(_) => {
                     println!("\t{0} [shape=box,label=\"{0}\"];", index);
                 }
             }
