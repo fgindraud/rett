@@ -301,6 +301,12 @@ mod graph {
         pub fn object(&self) -> &'a Object<A> {
             &self.object_data.object
         }
+        pub fn in_links(&self) -> &'a Vec<Index> {
+            &self.object_data.in_links
+        }
+        pub fn out_links(&self) -> &'a Vec<Index> {
+            &self.object_data.out_links
+        }
     }
 
     impl<'a, A: Eq + Hash + Clone> Iterator for OrderedObjectIterator<'a, A> {
@@ -359,45 +365,7 @@ fn output_as_dot(g: &Graph) {
         "#AA4499",
     ];
 
-    /* TODO
-    let mut link_color_indexes = HashMap::new();
-    let mut nb_colors = 0;
-
-    // Step 2
-    let mut link_color_indexes = HashMap::new();
-    for id in objects
-        .into_iter()
-        .filter_map(|(id, ref elem)| if elem.is_link() { Some(id) } else { None })
-    {
-        let color_index = match lower_index_neighbors.get(&id) {
-            Some(ref link_neighbors) => {
-                // Get colors of all neighbors of lower indexes
-                let neighbour_color_indexes = link_neighbors
-                    .iter()
-                    .map(|n| link_color_indexes[n])
-                    .collect::<Vec<_>>();
-                // Select first unused color index
-                let mut color_index = 0;
-                while neighbour_color_indexes.contains(&color_index) {
-                    color_index += 1
-                }
-                color_index
-            }
-            None => 0,
-        };
-        nb_colors = max(nb_colors, color_index + 1);
-        link_color_indexes.insert(id, color_index);
-    }
-
-    // Step 3
-    assert!(
-        nb_colors <= color_palette.len(),
-        "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
-        nb_colors,
-        color_palette.len()
-    );*/
-
-    // Print graph
+    // Pretty print for some types
     impl fmt::Display for graph::Index {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             self.to_usize().fmt(f)
@@ -411,6 +379,39 @@ fn output_as_dot(g: &Graph) {
             }
         }
     }
+
+    // Select a color
+    let mut link_color_indexes = HashMap::new();
+    let mut choose_link_color = |object_ref: &graph::ObjectRef<Atom>| {
+        let index = object_ref.index();
+        // Gather color indexes from neighbours with lesser indexes
+        let neighbour_color_indexes = (object_ref.in_links().iter())
+            .chain(object_ref.out_links().iter())
+            .filter(|&n| *n < index)
+            .map(|n| link_color_indexes[n])
+            .collect::<Vec<_>>();
+        // Select first unused color index
+        let mut color_index = 0;
+        while neighbour_color_indexes.contains(&color_index) {
+            color_index += 1
+        }
+        println!("IN {} = {:?}", index, object_ref.in_links());
+        println!("OUT {} = {:?}", index, object_ref.out_links());
+        println!(
+            "COLOR: selected {} for neighbors = {:?}",
+            color_index, neighbour_color_indexes
+        );
+        assert!(
+            color_index <= color_palette.len(),
+            "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
+            color_index,
+            color_palette.len()
+        );
+        // Store it for next calls to choose_link_color()
+        link_color_indexes.insert(index, color_index);
+        color_index
+    };
+
     println!("digraph {{");
     for object_ref in g.objects() {
         let index = object_ref.index();
@@ -423,7 +424,7 @@ fn output_as_dot(g: &Graph) {
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
                 );
-                let color = "red"; //color_palette[link_color_indexes[&index]];
+                let color = color_palette[choose_link_color(&object_ref)];
                 println!("\t{0} -> {1} [color=\"{2}\"];", link.from, index, color);
                 println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
             }
