@@ -2,20 +2,33 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
-/*
+/// A sparse vector.
 mod slot_vec {
-    struct Slot<T> {
+    enum Slot<T> {
         Used(T),
-        Unused,
+        Unused(Option<usize>),
     }
 
     pub struct SlotVec<T> {
+        slots: Vec<Slot<T>>,
+        next_unused_slot: Option<usize>,
     }
-}*/
+
+    impl<T> SlotVec<T> {
+        pub fn new() -> Self {
+            SlotVec {
+                slots: Vec::new(),
+                next_unused_slot: None,
+            }
+        }
+    }
+}
 
 /// Define a knowledge graph
 mod graph {
     use std::hash::Hash;
+    use std::collections::HashMap;
+    use slot_vec::SlotVec;
 
     /// Opaque Index type for graph elements.
     #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
@@ -55,7 +68,8 @@ mod graph {
     }
 
     pub struct Graph<A> {
-        objects: Vec<Option<ObjectData<A>>>, // TODO SlotVec<T>
+        objects: SlotVec<ObjectData<A>>,
+        indexes: HashMap<Object<A>, Index>,
     }
 }
 
@@ -130,21 +144,12 @@ impl Database {
     }
     pub fn insert(&mut self, object: Object) -> DatabaseIndex {
         let id = self.objects.insert(object);
-        self.register(id);
         id
-    }
-
-    fn register(&mut self, new_object_id: DatabaseIndex) {
-        // TODO
     }
 }
 impl From<IndexedSet<Object>> for Database {
     fn from(is: IndexedSet<Object>) -> Self {
-        let mut db = Database { objects: is };
-        //for (id, _) in db.objects.iter() {
-        //    db.register(id);
-        //} FIXME
-        db
+        Database { objects: is }
     }
 }
 
