@@ -189,10 +189,16 @@ mod graph {
         link_indexes: HashMap<Link, Index>,
     }
 
-    /// Reference an object and its data
+    /// Reference an object and its data.
     pub struct ObjectRef<'a, A: 'a> {
         index: Index,
         object_data: &'a ObjectData<A>,
+    }
+
+    /// Iterate on objects in order of increasing indexes.
+    pub struct OrderedObjectIterator<'a, A: 'a> {
+        next_index: usize,
+        graph: &'a Graph<A>,
     }
 
     impl Index {
@@ -209,15 +215,6 @@ mod graph {
                 in_links: Vec::new(),
                 out_links: Vec::new(),
             }
-        }
-    }
-
-    impl<'a, A> ObjectRef<'a, A> {
-        pub fn index(&self) -> Index {
-            self.index
-        }
-        pub fn object(&self) -> &'a Object<A> {
-            &self.object_data.object
         }
     }
 
@@ -239,6 +236,14 @@ mod graph {
                     index: index,
                     object_data: object_data,
                 })
+        }
+
+        /// Iterate on valid objects
+        pub fn objects<'a>(&'a self) -> OrderedObjectIterator<'a, A> {
+            OrderedObjectIterator {
+                next_index: 0,
+                graph: self,
+            }
         }
 
         /// Get index of an atom, or None if not found.
@@ -289,12 +294,29 @@ mod graph {
         }
     }
 
-    // FIXME tmp
-    pub fn make_index(i: usize) -> Index {
-        Index(i)
+    impl<'a, A> ObjectRef<'a, A> {
+        pub fn index(&self) -> Index {
+            self.index
+        }
+        pub fn object(&self) -> &'a Object<A> {
+            &self.object_data.object
+        }
     }
-    pub fn max_index<A>(g: &Graph<A>) -> usize {
-        g.objects.nb_slots()
+
+    impl<'a, A: Eq + Hash + Clone> Iterator for OrderedObjectIterator<'a, A> {
+        type Item = ObjectRef<'a, A>;
+        fn next(&mut self) -> Option<Self::Item> {
+            loop {
+                let current_index = self.next_index;
+                if current_index >= self.graph.objects.nb_slots() {
+                    return None;
+                };
+                self.next_index = current_index + 1;
+                if let Some(object_ref) = self.graph.object(Index(current_index)) {
+                    return Some(object_ref);
+                }
+            }
+        }
     }
 }
 
@@ -390,24 +412,23 @@ fn output_as_dot(g: &Graph) {
         }
     }
     println!("digraph {{");
-    for index in 0..graph::max_index(&g) {
-        if let Some(object_data) = g.object(graph::make_index(index)) {
-            match object_data.object() {
-                &Object::Atom(ref a) => {
-                    println!("\t{0} [shape=box,label=\"{0} = {1}\"];", index, a);
-                }
-                &Object::Link(ref link) => {
-                    println!(
+    for object_ref in g.objects() {
+        let index = object_ref.index();
+        match object_ref.object() {
+            &Object::Atom(ref a) => {
+                println!("\t{0} [shape=box,label=\"{0} = {1}\"];", index, a);
+            }
+            &Object::Link(ref link) => {
+                println!(
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
                 );
-                    let color = "red"; //color_palette[link_color_indexes[&index]];
-                    println!("\t{0} -> {1} [color=\"{2}\"];", link.from, index, color);
-                    println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
-                }
-                &Object::Entity(_) => {
-                    println!("\t{0} [shape=box,label=\"{0}\"];", index);
-                }
+                let color = "red"; //color_palette[link_color_indexes[&index]];
+                println!("\t{0} -> {1} [color=\"{2}\"];", link.from, index, color);
+                println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
+            }
+            &Object::Entity(_) => {
+                println!("\t{0} [shape=box,label=\"{0}\"];", index);
             }
         }
     }
