@@ -381,26 +381,28 @@ fn output_as_dot(g: &Graph) {
     }
 
     // Select a color
-    let mut link_color_indexes = HashMap::new();
+    let mut link_color_indexes: HashMap<graph::Index, usize> = HashMap::new();
     let mut choose_link_color = |object_ref: &graph::ObjectRef<Atom>| {
         let index = object_ref.index();
         // Gather color indexes from neighbours with lesser indexes
+        let link_ends = match object_ref.object() {
+            &Object::Link(ref l) => [l.from, l.to], // FIXME only if they are links too
+            _ => panic!("must be a link"),
+        };
         let neighbour_color_indexes = (object_ref.in_links().iter())
             .chain(object_ref.out_links().iter())
+            .chain(link_ends.iter())
             .filter(|&n| *n < index)
-            .map(|n| link_color_indexes[n])
+            .map(|n| match link_color_indexes.get(n) {
+                Some(&color) => color,
+                None => panic!("link_color_indexes[{}] not found, index={}", n, index),
+            })
             .collect::<Vec<_>>();
         // Select first unused color index
         let mut color_index = 0;
         while neighbour_color_indexes.contains(&color_index) {
             color_index += 1
         }
-        println!("IN {} = {:?}", index, object_ref.in_links());
-        println!("OUT {} = {:?}", index, object_ref.out_links());
-        println!(
-            "COLOR: selected {} for neighbors = {:?}",
-            color_index, neighbour_color_indexes
-        );
         assert!(
             color_index <= color_palette.len(),
             "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
