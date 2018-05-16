@@ -2,6 +2,63 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
+/*
+mod slot_vec {
+    struct Slot<T> {
+        Used(T),
+        Unused,
+    }
+
+    pub struct SlotVec<T> {
+    }
+}*/
+
+/// Define a knowledge graph
+mod graph {
+    use std::hash::Hash;
+
+    /// Opaque Index type for graph elements.
+    #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
+    pub struct Index(usize);
+
+    /// A directed link (edge of the graph).
+    #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+    pub struct Link {
+        from: Index,
+        to: Index,
+    }
+
+    /// An abstract graph entity (node of the graph).
+    /// Defined only by its relationships: considered different from others.
+    #[derive(Eq, Hash, Clone, Serialize, Deserialize)]
+    pub struct Entity;
+    impl PartialEq for Entity {
+        fn eq(&self, _rhs: &Entity) -> bool {
+            false
+        }
+    }
+
+    /// Object of the graph: Link, Entity, or Atom (parametrized).
+    #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+    pub enum Object<A> {
+        Atom(A),
+        Link(Link),
+        Entity(Entity),
+    }
+
+    /// Data for each object.
+    /// In addition to the object, stored ids of links pointing from/to the object.
+    pub struct ObjectData<A> {
+        object: Object<A>,
+        in_links: Vec<Index>,
+        out_links: Vec<Index>,
+    }
+
+    pub struct Graph<A> {
+        objects: Vec<Option<ObjectData<A>>>, // TODO SlotVec<T>
+    }
+}
+
 mod indexed_set;
 use indexed_set::IndexedSet;
 
