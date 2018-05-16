@@ -6,11 +6,8 @@ use std::ops;
 
 /*******************************************************************************
  * A set of indexed objects of type T.
- *
- * TODO rename Cells to Slot
- * Cells can be created and destroyed.
- * Cells are unique.
- * After creation, cells are immutable.
+ * After insertions, objects are immutable.
+ * Objects are unique: cannot be inserted twice.
  */
 
 // PartialEq + Eq + Hash: index_of and unicity
@@ -26,15 +23,15 @@ pub struct Index(usize);
  * Also contains a Map<T, index>.
  */
 pub struct IndexedSet<T> {
-    cells: Vec<Cell<T>>,
+    slots: Vec<Slot<T>>,
     indexes: HashMap<T, Index>,
     nb_elements: usize,
 }
 
-// Each cell of the vector can be in use or unused.
-pub enum Cell<T> {
+// Each slot of the vector can be in use or unused.
+pub enum Slot<T> {
     Used(T),
-    Unused, // TODO Pointer to next unused cell
+    Unused, // TODO Pointer to next unused slot
 }
 
 impl Index {
@@ -48,12 +45,12 @@ impl fmt::Display for Index {
     }
 }
 
-impl<T> Cell<T> {
+impl<T> Slot<T> {
     // Convert to Option<&T>, abstracting away the free list system.
     fn value(&self) -> Option<&T> {
         match self {
-            &Cell::Used(ref v) => Some(v),
-            &Cell::Unused => None,
+            &Slot::Used(ref v) => Some(v),
+            &Slot::Unused => None,
         }
     }
 }
@@ -65,7 +62,7 @@ where
     // Create a new empty set
     pub fn new() -> IndexedSet<T> {
         IndexedSet {
-            cells: Vec::new(),
+            slots: Vec::new(),
             indexes: HashMap::new(),
             nb_elements: 0,
         }
@@ -80,12 +77,12 @@ where
     // Represent the size of the internal array.
     // Indexes may not be valid !
     pub fn nb_indexes(&self) -> usize {
-        self.cells.len()
+        self.slots.len()
     }
 
-    // Access cell through index (if the index is in use)
+    // Access slot through index (if the index is in use)
     pub fn get(&self, index: Index) -> Option<&T> {
-        self.cells[index.as_usize()].value()
+        self.slots[index.as_usize()].value()
     }
 
     // Get index of a value (if in the set)
@@ -95,9 +92,9 @@ where
 
     // Iterate on all indexes
 
-    // Iterate on cells (may be empty)
-    pub fn cell_iter<'a>(&'a self) -> CellIterator<'a, T> {
-        CellIterator::new(&self.cells)
+    // Iterate on slots (may be empty)
+    pub fn slot_iter<'a>(&'a self) -> SlotIterator<'a, T> {
+        SlotIterator::new(&self.slots)
     }
 
     // TODO add iter() method
@@ -117,52 +114,52 @@ where
 
     // Push an entry without checking if it is already defined; return new index.
     fn push_new_entry(&mut self, value: T) -> Index {
-        let new_index = Index(self.cells.len());
-        self.cells.push(Cell::Used(value.clone())); // TODO reuse existing cell if possible
+        let new_index = Index(self.slots.len());
+        self.slots.push(Slot::Used(value.clone())); // TODO reuse existing slot if possible
         let previous_value = self.indexes.insert(value, new_index);
         debug_assert_eq!(previous_value, None);
         self.nb_elements += 1;
         new_index
     }
-    // Push a single unused cell at the end
+    // Push a single unused slot at the end
     fn push_unused(&mut self) {
-        self.cells.push(Cell::Unused)
+        self.slots.push(Slot::Unused)
     }
 
     // Remove object from the set through its id.
     // Does nothing if the index does not exist.
     pub fn remove_id(&mut self, index: Index) {
-        let cell = &mut self.cells[index.as_usize()];
-        if let &mut Cell::Used(_) = cell {
+        let slot = &mut self.slots[index.as_usize()];
+        if let &mut Slot::Used(_) = slot {
             self.nb_elements -= 1;
-            let previous_value = self.indexes.remove(cell.value().unwrap());
+            let previous_value = self.indexes.remove(slot.value().unwrap());
             debug_assert_eq!(previous_value, Some(index));
-            *cell = Cell::Unused // TODO add to free list
+            *slot = Slot::Unused // TODO add to free list
         }
     }
 }
 
-// Indexing operator: panics if the cell is unused
+// Indexing operator: panics if the slot is unused
 impl<T> ops::Index<Index> for IndexedSet<T>
 where
     T: IndexedSetCapableType,
 {
     type Output = T;
     fn index(&self, index: Index) -> &T {
-        self.cell(index).unwrap()
+        self.get(index).unwrap()
     }
 }
 
 // Iterator on indexes
 pub struct IndexIterator {
     index: usize,
-    nb_cells: usize,
+    nb_slots: usize,
 }
 impl IndexIterator {
-    fn new(nb_cells: usize) -> Self {
+    fn new(nb_slots: usize) -> Self {
         IndexIterator {
             index: 0,
-            nb_cells: nb_cells,
+            nb_slots: nb_slots,
         }
     }
 }
@@ -171,7 +168,7 @@ impl iter::Iterator for IndexIterator {
     fn next(&mut self) -> Option<Self::Item> {
         let current_index = self.index;
         self.index += 1;
-        if self.index <= self.nb_cells {
+        if self.index <= self.nb_slots {
             Some(Index(current_index))
         } else {
             None
@@ -179,26 +176,26 @@ impl iter::Iterator for IndexIterator {
     }
 }
 
-// Iterator on cells
-pub struct CellIterator<'a, T: 'a> {
-    cells: &'a Vec<Cell<T>>,
+// Iterator on slots
+pub struct SlotIterator<'a, T: 'a> {
+    slots: &'a Vec<Slot<T>>,
     index: usize,
 }
-impl<'a, T> CellIterator<'a, T> {
-    fn new(cells: &'a Vec<Cell<T>>) -> Self {
-        CellIterator {
-            cells: cells,
+impl<'a, T> SlotIterator<'a, T> {
+    fn new(slots: &'a Vec<Slot<T>>) -> Self {
+        SlotIterator {
+            slots: slots,
             index: 0,
         }
     }
 }
-impl<'a, T> iter::Iterator for CellIterator<'a, T> {
+impl<'a, T> iter::Iterator for SlotIterator<'a, T> {
     type Item = (Index, Option<&'a T>);
     fn next(&mut self) -> Option<Self::Item> {
         let current_index = self.index;
         self.index += 1;
-        if self.index <= self.cells.len() {
-            Some((Index(current_index), self.cells[current_index].value()))
+        if self.index <= self.slots.len() {
+            Some((Index(current_index), self.slots[current_index].value()))
         } else {
             None
         }
@@ -213,14 +210,14 @@ where
 {
     type Item = (Index, &'a T);
     type IntoIter = iter::FilterMap<
-        iter::Enumerate<::std::slice::Iter<'a, Cell<T>>>,
-        fn((usize, &'a Cell<T>)) -> Option<Self::Item>,
+        iter::Enumerate<::std::slice::Iter<'a, Slot<T>>>,
+        fn((usize, &'a Slot<T>)) -> Option<Self::Item>,
     >;
     fn into_iter(self) -> Self::IntoIter {
-        self.cells
+        self.slots
             .iter()
             .enumerate()
-            .filter_map(|(raw_index, ref cell)| match cell.value() {
+            .filter_map(|(raw_index, ref slot)| match slot.value() {
                 Some(ref v) => Some((Index(raw_index), v)),
                 None => None,
             })
@@ -230,7 +227,7 @@ where
 /*******************************************************************************
  * Serialize / Deserialize.
  * The vector is stored as an array of Option<T>.
- * Unused cells are kept, to avoid complex id conversion if ids are used by user code.
+ * Unused slots are kept, to avoid complex id conversion if ids are used by user code.
  */
 impl<T> ::serde::Serialize for IndexedSet<T>
 where
@@ -241,9 +238,9 @@ where
         S: ::serde::Serializer,
     {
         use serde::ser::SerializeSeq;
-        let mut seq = serializer.serialize_seq(Some(self.cells.len()))?;
-        for cell in &self.cells {
-            seq.serialize_element(&cell.value())?;
+        let mut seq = serializer.serialize_seq(Some(self.slots.len()))?;
+        for slot in &self.slots {
+            seq.serialize_element(&slot.value())?;
         }
         seq.end()
     }
@@ -281,9 +278,9 @@ where
             {
                 let mut vector = IndexedSet::new();
 
-                while let Some(cell) = try!(seq.next_element()) {
-                    match cell {
-                        // Add values manually to prevent reuse of cells or such
+                while let Some(slot) = try!(seq.next_element()) {
+                    match slot {
+                        // Add values manually to prevent reuse of slots or such
                         Some(value) => {
                             vector.push_new_entry(value);
                         }
@@ -316,7 +313,7 @@ mod tests {
 
         let id_42 = is.insert(42);
         assert_eq!(is.index_of(&42), Some(id_42));
-        assert_eq!(is.cell(id_42), Some(&42));
+        assert_eq!(is.get(id_42), Some(&42));
         assert_eq!(is[id_42], 42);
         assert_eq!(is.len(), 1);
 
@@ -328,6 +325,6 @@ mod tests {
 
         is.remove_id(id_42);
         assert_eq!(is.len(), 1);
-        assert_eq!(is.cell(id_42), None);
+        assert_eq!(is.get(id_42), None);
     }
 }
