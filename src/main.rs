@@ -5,6 +5,7 @@ extern crate serde_derive;
 /// A sparse vector, where objects are accessed by indexes.
 mod slot_vec {
     use std::mem;
+    use std::ops;
 
     enum Slot<T> {
         Used(T),
@@ -77,13 +78,55 @@ mod slot_vec {
             if let Slot::Used(_) = *slot {
                 let old_next_unused_slot_id =
                     mem::replace(&mut self.next_unused_slot_id, Some(index));
-                match mem::replace(slot, Slot::Unused(old_next_unused_slot_id)) {
-                    Slot::Used(value) => Some(value),
+                let old_value = match mem::replace(slot, Slot::Unused(old_next_unused_slot_id)) {
+                    Slot::Used(value) => value,
                     _ => panic!("Slot was used"),
-                }
+                };
+                self.nb_objects -= 1;
+                Some(old_value)
             } else {
                 None
             }
+        }
+    }
+
+    /// Indexation with []: panics on invalid index.
+    impl<T> ops::Index<usize> for SlotVec<T> {
+        type Output = T;
+        fn index(&self, index: usize) -> &T {
+            self.get(index).expect("invalid index")
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn basic_api() {
+            let mut sv = super::SlotVec::new();
+            assert_eq!(sv.len(), 0);
+            assert_eq!(sv.nb_slots(), 0);
+
+            let id_42 = sv.insert(42);
+            assert_eq!(sv.get(id_42), Some(&42));
+            assert_eq!(sv[id_42], 42);
+            assert_eq!(sv.len(), 1);
+            assert_eq!(sv.nb_slots(), 1);
+
+            let id_12 = sv.insert(12);
+            assert_ne!(id_42, id_12);
+            assert_eq!(sv.len(), 2);
+            assert_eq!(sv.nb_slots(), 2);
+
+            assert_eq!(sv.remove(id_42), Some(42));
+            assert_eq!(sv.len(), 1);
+            assert_eq!(sv.get(id_42), None);
+            assert_eq!(sv.nb_slots(), 2);
+
+            // Check reuse
+            let id_34 = sv.insert(34);
+            assert_eq!(id_34, id_42);
+            assert_ne!(id_42, id_12);
+            assert_eq!(sv.nb_slots(), 2);
         }
     }
 }
