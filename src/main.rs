@@ -157,8 +157,8 @@ mod graph {
     /// A directed link (edge of the graph)
     #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
     pub struct Link {
-        from: Index,
-        to: Index,
+        pub from: Index,
+        pub to: Index,
     }
 
     /// An abstract graph entity (node of the graph).
@@ -176,15 +176,16 @@ mod graph {
 
     /// Data for each object.
     /// In addition to the object, stored ids of links pointing from/to the object.
-    struct ObjectData<A> {
-        object: Object<A>,
+    pub struct ObjectData<A> {
+        // FIXME pub
+        pub object: Object<A>, // FIXME pub
         in_links: Vec<Index>,
         out_links: Vec<Index>,
     }
 
     /// Store a graph.
     pub struct Graph<A> {
-        objects: SlotVec<ObjectData<A>>,
+        pub objects: SlotVec<ObjectData<A>>, //FIXME pub
         atom_indexes: HashMap<A, Index>,
         link_indexes: HashMap<Link, Index>,
     }
@@ -279,100 +280,75 @@ impl<'a> From<&'a str> for Atom {
 }
 
 type Graph = graph::Graph<Atom>;
+use graph::Object;
 
-/*******************************************************************************
- * Output as dot.
- */
-/*
-fn output_as_dot(objects: &IndexedSet<Object>) {
+///*****************************************************************************
+/// Output graph as dot.
+fn output_as_dot(g: &Graph) {
     use std::collections::HashMap;
-    use std::cmp::{max, min};
+    use std::fmt;
 
-    /* Color palette for Link arrows in dot.
-     * Color palette selection is complicated.
-     * For now, use a fixed size palette, which should be sufficient as there are few conflicts.
+    /* Link arrow color selection.
+     *
+     * Links are encoded as two consecutive arrows in Graphviz, with a dummy node in the middle.
+     * To improve readability, each link is given an arrow color different from neighbor links.
+     * This color is used for both Graphviz arrows.
+     *
+     * Colors are selected from a fixed palette (generating one is complex).
+     * This should be sufficient as theere are few conflicts in practice.
+     *
+     * Colors are chosen by a greedy algorithm:
+     * color (link) = min unused index among lower index link neighbors.
      */
     let color_palette = [
         "#332288", "#88CCEE", "#44AA99", "#117733", "#999933", "#DDCC77", "#CC6677", "#882255",
         "#AA4499",
     ];
 
-    let link_color_indexes = {
-        /* Link arrow color selection.
-         *
-         * This algorithm select different colors for Link arrows to improve readability.
-         * The rule is to select different colors for Link that touch (descriptions).
-         * This is equivalent to coloring nodes of a graph of connected 'links'.
-         *
-         * Step 1: Determine the list of neighbor Links of each Link.
-         * Step 2: Attribute a color index to each Link.
-         * Step 3: Select a color (currently, a fixed palette).
-         *
-         * The algorithm always does a pass through Links in increasing index order, for all steps.
-         * Step 2 is a simple greedy algorithm:
-         * color (link) = min unused index among lower index link neighbors.
-         * Thus Step 1 only create a neighbor list of lower index neighbors.
-         */
+    /* TODO
+    let mut link_color_indexes = HashMap::new();
+    let mut nb_colors = 0;
 
-        // Step 1
-        let mut lower_index_neighbors = HashMap::new();
-        for (index, elem) in objects {
-            if let &Object::Link(ref link) = elem {
-                if objects[link.from].is_link() {
-                    lower_index_neighbors
-                        .entry(max(index, link.from))
-                        .or_insert(Vec::new())
-                        .push(min(index, link.from));
+    // Step 2
+    let mut link_color_indexes = HashMap::new();
+    for id in objects
+        .into_iter()
+        .filter_map(|(id, ref elem)| if elem.is_link() { Some(id) } else { None })
+    {
+        let color_index = match lower_index_neighbors.get(&id) {
+            Some(ref link_neighbors) => {
+                // Get colors of all neighbors of lower indexes
+                let neighbour_color_indexes = link_neighbors
+                    .iter()
+                    .map(|n| link_color_indexes[n])
+                    .collect::<Vec<_>>();
+                // Select first unused color index
+                let mut color_index = 0;
+                while neighbour_color_indexes.contains(&color_index) {
+                    color_index += 1
                 }
-                if objects[link.to].is_link() {
-                    lower_index_neighbors
-                        .entry(max(index, link.to))
-                        .or_insert(Vec::new())
-                        .push(min(index, link.to));
-                }
+                color_index
             }
-        }
-        let lower_index_neighbors = lower_index_neighbors;
+            None => 0,
+        };
+        nb_colors = max(nb_colors, color_index + 1);
+        link_color_indexes.insert(id, color_index);
+    }
 
-        // Step 2
-        let mut nb_colors = 0;
-        let mut link_color_indexes = HashMap::new();
-        for id in objects
-            .into_iter()
-            .filter_map(|(id, ref elem)| if elem.is_link() { Some(id) } else { None })
-        {
-            let color_index = match lower_index_neighbors.get(&id) {
-                Some(ref link_neighbors) => {
-                    // Get colors of all neighbors of lower indexes
-                    let neighbour_color_indexes = link_neighbors
-                        .iter()
-                        .map(|n| link_color_indexes[n])
-                        .collect::<Vec<_>>();
-                    // Select first unused color index
-                    let mut color_index = 0;
-                    while neighbour_color_indexes.contains(&color_index) {
-                        color_index += 1
-                    }
-                    color_index
-                }
-                None => 0,
-            };
-            nb_colors = max(nb_colors, color_index + 1);
-            link_color_indexes.insert(id, color_index);
-        }
-
-        // Step 3
-        assert!(
-            nb_colors <= color_palette.len(),
-            "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
-            nb_colors,
-            color_palette.len()
-        );
-        link_color_indexes
-    };
+    // Step 3
+    assert!(
+        nb_colors <= color_palette.len(),
+        "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
+        nb_colors,
+        color_palette.len()
+    );*/
 
     // Print graph
-    use std::fmt;
+    impl fmt::Display for graph::Index {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            self.to_usize().fmt(f)
+        }
+    }
     impl fmt::Display for Atom {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
@@ -382,28 +358,29 @@ fn output_as_dot(objects: &IndexedSet<Object>) {
         }
     }
     println!("digraph {{");
-    for (index, elem) in objects {
-        match elem {
-            &Object::Atom(ref a) => {
-                println!("\t{0} [shape=box,label=\"{0} = {1}\"];", index, a);
-            }
-            &Object::Link(ref link) => {
-                println!(
+    for index in 0..g.objects.nb_slots() {
+        if let Some(object_data) = g.objects.get(index) {
+            match object_data.object {
+                Object::Atom(ref a) => {
+                    println!("\t{0} [shape=box,label=\"{0} = {1}\"];", index, a);
+                }
+                Object::Link(ref link) => {
+                    println!(
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
                 );
-                let color = color_palette[link_color_indexes[&index]];
-                println!("\t{0} -> {1} [color=\"{2}\"];", link.from, index, color);
-                println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
-            }
-            &Object::Entity(_) => {
-                println!("\t{0} [shape=box,label=\"{0}\"];", index);
+                    let color = "red"; //color_palette[link_color_indexes[&index]];
+                    println!("\t{0} -> {1} [color=\"{2}\"];", link.from, index, color);
+                    println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
+                }
+                Object::Entity(_) => {
+                    println!("\t{0} [shape=box,label=\"{0}\"];", index);
+                }
             }
         }
     }
     println!("}}");
 }
-*/
 
 /*******************************************************************************
  * TODO queries, with hash map for referencing
@@ -458,5 +435,5 @@ fn set_test_data(g: &mut Graph) {
 fn main() {
     let mut graph = Graph::new();
     set_test_data(&mut graph);
-    //output_as_dot(&graph);
+    output_as_dot(&graph);
 }
