@@ -2,23 +2,87 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
-/// A sparse vector.
+/// A sparse vector, where objects are accessed by indexes.
 mod slot_vec {
+    use std::mem;
+
     enum Slot<T> {
         Used(T),
-        Unused(Option<usize>),
+        Unused(Option<usize>), // Element of a free list of unused Slots
     }
-
     pub struct SlotVec<T> {
         slots: Vec<Slot<T>>,
-        next_unused_slot: Option<usize>,
+        next_unused_slot_id: Option<usize>, // Free list head
+        nb_objects: usize,
     }
 
     impl<T> SlotVec<T> {
+        /// Create an empty SlotVec.
         pub fn new() -> Self {
             SlotVec {
                 slots: Vec::new(),
-                next_unused_slot: None,
+                next_unused_slot_id: None,
+                nb_objects: 0,
+            }
+        }
+        /// Number of stored objects.
+        pub fn len(&self) -> usize {
+            self.nb_objects
+        }
+        /// Number of slots (and maximum index).
+        pub fn nb_slots(&self) -> usize {
+            self.slots.len()
+        }
+        /// access a slot (returns none if empty slot).
+        pub fn get(&self, index: usize) -> Option<&T> {
+            match self.slots[index] {
+                Slot::Used(ref value) => Some(value),
+                _ => None,
+            }
+        }
+        /// access a slot (returns none if empty slot): mut version.
+        pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+            match self.slots[index] {
+                Slot::Used(ref mut value) => Some(value),
+                _ => None,
+            }
+        }
+
+        /// Insert an object in any slot, returns the new object index.
+        pub fn insert(&mut self, value: T) -> usize {
+            let new_id = {
+                if let Some(unused_id) = self.next_unused_slot_id {
+                    // Pop unused slot from free list
+                    let unused_slot = &mut self.slots[unused_id];
+                    if let Slot::Unused(next_unused_slot_id) = *unused_slot {
+                        self.next_unused_slot_id = next_unused_slot_id;
+                        *unused_slot = Slot::Used(value);
+                        unused_id
+                    } else {
+                        panic!("Used Slot in free list");
+                    }
+                } else {
+                    // Allocate new slot
+                    let end_of_vec_id = self.nb_slots();
+                    self.slots.push(Slot::Used(value));
+                    end_of_vec_id
+                }
+            };
+            self.nb_objects += 1;
+            new_id
+        }
+        /// Remove the object at the given index. Return the object that was removed.
+        pub fn remove(&mut self, index: usize) -> Option<T> {
+            let slot = &mut self.slots[index];
+            if let Slot::Used(_) = *slot {
+                let old_next_unused_slot_id =
+                    mem::replace(&mut self.next_unused_slot_id, Some(index));
+                match mem::replace(slot, Slot::Unused(old_next_unused_slot_id)) {
+                    Slot::Used(value) => Some(value),
+                    _ => panic!("Slot was used"),
+                }
+            } else {
+                None
             }
         }
     }
@@ -26,15 +90,14 @@ mod slot_vec {
 
 /// Define a knowledge graph
 mod graph {
-    use std::hash::Hash;
     use std::collections::HashMap;
     use slot_vec::SlotVec;
 
-    /// Opaque Index type for graph elements.
+    /// Opaque Index type for graph elements
     #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
     pub struct Index(usize);
 
-    /// A directed link (edge of the graph).
+    /// A directed link (edge of the graph)
     #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
     pub struct Link {
         from: Index,
@@ -61,7 +124,7 @@ mod graph {
 
     /// Data for each object.
     /// In addition to the object, stored ids of links pointing from/to the object.
-    pub struct ObjectData<A> {
+    struct ObjectData<A> {
         object: Object<A>,
         in_links: Vec<Index>,
         out_links: Vec<Index>,
