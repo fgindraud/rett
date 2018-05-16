@@ -2,6 +2,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
+///*****************************************************************************
 /// A sparse vector, where objects are accessed by indexes.
 mod slot_vec {
     use std::mem;
@@ -26,6 +27,7 @@ mod slot_vec {
                 nb_objects: 0,
             }
         }
+
         /// Number of stored objects.
         pub fn len(&self) -> usize {
             self.nb_objects
@@ -34,6 +36,7 @@ mod slot_vec {
         pub fn nb_slots(&self) -> usize {
             self.slots.len()
         }
+
         /// access a slot (returns none if empty slot).
         pub fn get(&self, index: usize) -> Option<&T> {
             match self.slots[index] {
@@ -97,6 +100,11 @@ mod slot_vec {
             self.get(index).expect("invalid index")
         }
     }
+    impl<T> ops::IndexMut<usize> for SlotVec<T> {
+        fn index_mut(&mut self, index: usize) -> &mut T {
+            self.get_mut(index).expect("invalid index")
+        }
+    }
 
     #[cfg(test)]
     mod tests {
@@ -127,18 +135,27 @@ mod slot_vec {
             assert_eq!(id_34, id_42);
             assert_ne!(id_42, id_12);
             assert_eq!(sv.nb_slots(), 2);
+
+            sv[id_34] = 0;
         }
     }
 }
 
+///*****************************************************************************
 /// Define a knowledge graph
 mod graph {
+    use std::hash::Hash;
     use std::collections::HashMap;
     use slot_vec::SlotVec;
 
     /// Opaque Index type for graph elements
     #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
     pub struct Index(usize);
+    impl Index {
+        pub fn to_usize(&self) -> usize {
+            self.0
+        }
+    }
 
     /// A directed link (edge of the graph)
     #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
@@ -148,17 +165,12 @@ mod graph {
     }
 
     /// An abstract graph entity (node of the graph).
-    /// Defined only by its relationships: considered different from others.
-    #[derive(Eq, Hash, Clone, Serialize, Deserialize)]
+    /// Defined only by its relationships: not comparable.
+    #[derive(Clone, Serialize, Deserialize, Debug)]
     pub struct Entity;
-    impl PartialEq for Entity {
-        fn eq(&self, _rhs: &Entity) -> bool {
-            false
-        }
-    }
 
     /// Object of the graph: Link, Entity, or Atom (parametrized).
-    #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+    #[derive(Clone, Serialize, Deserialize)]
     pub enum Object<A> {
         Atom(A),
         Link(Link),
@@ -175,7 +187,75 @@ mod graph {
 
     pub struct Graph<A> {
         objects: SlotVec<ObjectData<A>>,
-        indexes: HashMap<Object<A>, Index>,
+        atom_indexes: HashMap<A, Index>,
+        link_indexes: HashMap<Link, Index>,
+    }
+
+    impl<A> ObjectData<A> {
+        fn new(object: Object<A>) -> Self {
+            ObjectData {
+                object: object,
+                in_links: Vec::new(),
+                out_links: Vec::new(),
+            }
+        }
+    }
+
+    impl<A: Eq + Hash + Clone> Graph<A> {
+        /// Create a new empty graph.
+        pub fn new() -> Self {
+            Graph {
+                objects: SlotVec::new(),
+                atom_indexes: HashMap::new(),
+                link_indexes: HashMap::new(),
+            }
+        }
+
+        /// Get index of an atom, or None if not found.
+        pub fn index_of_atom(&self, atom: &A) -> Option<Index> {
+            self.atom_indexes.get(&atom).map(|index_ref| *index_ref)
+        }
+        /// Get index of a link, or None if not found.
+        pub fn index_of_link(&self, link: &Link) -> Option<Index> {
+            self.link_indexes.get(&link).map(|index_ref| *index_ref)
+        }
+
+        /// Insert a new atom, return its index.
+        /// If already present, only return the current index for the atom.
+        pub fn insert_atom(&mut self, atom: A) -> Index {
+            match self.index_of_atom(&atom) {
+                Some(index) => index,
+                None => {
+                    let new_index = Index(
+                        self.objects
+                            .insert(ObjectData::new(Object::Atom(atom.clone()))),
+                    );
+                    self.atom_indexes.insert(atom, new_index);
+                    new_index
+                }
+            }
+        }
+        /// Insert a new link, return its index.
+        /// If already present, only return the current index for the link.
+        pub fn insert_link(&mut self, link: Link) -> Index {
+            match self.index_of_link(&link) {
+                Some(index) => index,
+                None => {
+                    let new_index = Index(
+                        self.objects
+                            .insert(ObjectData::new(Object::Link(link.clone()))),
+                    );
+                    self.objects[link.from.to_usize()].out_links.push(new_index);
+                    self.objects[link.to.to_usize()].in_links.push(new_index);
+                    self.link_indexes.insert(link, new_index);
+                    new_index
+                }
+            }
+        }
+        /// Insert a new entity. Return its index.
+        pub fn insert_entity(&mut self) -> Index {
+            Index(self.objects.insert(ObjectData::new(Object::Entity(Entity))))
+        }
     }
 }
 
