@@ -1,6 +1,8 @@
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate serde_json;
+// TODO impl serde support for graph (direct)
 
 ///*****************************************************************************
 /// A sparse vector, where objects are accessed by indexes.
@@ -151,11 +153,6 @@ mod graph {
     /// Opaque Index type for graph elements
     #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
     pub struct Index(usize);
-    impl Index {
-        pub fn to_usize(&self) -> usize {
-            self.0
-        }
-    }
 
     /// A directed link (edge of the graph)
     #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
@@ -185,10 +182,18 @@ mod graph {
         out_links: Vec<Index>,
     }
 
+    /// Store a graph.
     pub struct Graph<A> {
         objects: SlotVec<ObjectData<A>>,
         atom_indexes: HashMap<A, Index>,
         link_indexes: HashMap<Link, Index>,
+    }
+
+    impl Index {
+        /// Access (read only) the underlying value.
+        pub fn to_usize(&self) -> usize {
+            self.0
+        }
     }
 
     impl<A> ObjectData<A> {
@@ -237,7 +242,8 @@ mod graph {
         }
         /// Insert a new link, return its index.
         /// If already present, only return the current index for the link.
-        pub fn insert_link(&mut self, link: Link) -> Index {
+        pub fn insert_link(&mut self, from: Index, to: Index) -> Index {
+            let link = Link { from: from, to: to }; // TODO improve ?
             match self.index_of_link(&link) {
                 Some(index) => index,
                 None => {
@@ -259,110 +265,25 @@ mod graph {
     }
 }
 
-mod indexed_set;
-use indexed_set::IndexedSet;
-
-/*******************************************************************************
- * Database
- */
-type DatabaseIndex = indexed_set::Index;
-
-// Atom: represents a basic piece of data (integer, string, etc)
+///*****************************************************************************
+/// Atom: represents a basic piece of data (integer, string, etc)
 #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 enum Atom {
     String(String),
     Integer(i32),
 }
-
-// Link: a directed arrow between two elements.
-#[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-struct Link {
-    from: DatabaseIndex,
-    to: DatabaseIndex,
-}
-
-// Entity: an abstract object, defined by its relations with others.
-// Cannot be compared with each other.
-#[derive(Eq, Hash, Clone, Serialize, Deserialize)]
-struct Entity;
-impl PartialEq for Entity {
-    fn eq(&self, _: &Entity) -> bool {
-        false
+impl<'a> From<&'a str> for Atom {
+    fn from(text: &'a str) -> Self {
+        Atom::String(String::from(text))
     }
 }
 
-// Object: Sum type of the three above.
-#[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-enum Object {
-    Atom(Atom),
-    Link(Link),
-    Entity(Entity),
-}
-impl Object {
-    // Nice constructors
-    fn text(text: &str) -> Object {
-        Object::Atom(Atom::String(String::from(text)))
-    }
-    fn link(from: DatabaseIndex, to: DatabaseIndex) -> Object {
-        Object::Link(Link { from: from, to: to })
-    }
-    fn entity() -> Object {
-        Object::Entity(Entity)
-    }
-    // AAA
-    fn is_link(&self) -> bool {
-        match self {
-            &Object::Link(_) => true,
-            _ => false,
-        }
-    }
-}
-
-struct Database {
-    objects: IndexedSet<Object>,
-}
-
-impl Database {
-    pub fn new() -> Database {
-        Database {
-            objects: IndexedSet::new(),
-        }
-    }
-    pub fn insert(&mut self, object: Object) -> DatabaseIndex {
-        let id = self.objects.insert(object);
-        id
-    }
-}
-impl From<IndexedSet<Object>> for Database {
-    fn from(is: IndexedSet<Object>) -> Self {
-        Database { objects: is }
-    }
-}
-
-// Serialize / Deserialize: only export the array.
-impl ::serde::Serialize for Database {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ::serde::Serializer,
-    {
-        self.objects.serialize(serializer)
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for Database {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: ::serde::Deserializer<'de>,
-    {
-        match IndexedSet::<Object>::deserialize(deserializer) {
-            Ok(objects) => Ok(Database::from(objects)),
-            Err(e) => Err(e),
-        }
-    }
-}
+type Graph = graph::Graph<Atom>;
 
 /*******************************************************************************
  * Output as dot.
  */
+/*
 fn output_as_dot(objects: &IndexedSet<Object>) {
     use std::collections::HashMap;
     use std::cmp::{max, min};
@@ -482,6 +403,7 @@ fn output_as_dot(objects: &IndexedSet<Object>) {
     }
     println!("}}");
 }
+*/
 
 /*******************************************************************************
  * TODO queries, with hash map for referencing
@@ -490,61 +412,51 @@ fn output_as_dot(objects: &IndexedSet<Object>) {
 /*******************************************************************************
  * Test
  */
-extern crate serde_json;
-
-fn create_name_prop(db: &mut Database) -> DatabaseIndex {
-    let name_entity = db.insert(Object::entity());
-    let name_text = db.insert(Object::text("name"));
-    let name_entity_description = db.insert(Object::link(name_text, name_entity));
-    let _name_entity_description_description =
-        db.insert(Object::link(name_entity, name_entity_description));
+fn create_name_prop(g: &mut Graph) -> graph::Index {
+    let name_entity = g.insert_entity();
+    let name_text = g.insert_atom(Atom::from("name"));
+    let name_entity_description = g.insert_link(name_text, name_entity);
+    let _name_entity_description_description = g.insert_link(name_entity, name_entity_description);
     name_entity
 }
 
-fn create_named_entity(db: &mut Database, name_entity: DatabaseIndex, text: &str) -> DatabaseIndex {
-    let entity = db.insert(Object::entity());
-    let atom = db.insert(Object::text(text));
-    let link = db.insert(Object::link(atom, entity));
-    let _link_description = db.insert(Object::link(name_entity, link));
+fn create_named_entity(g: &mut Graph, name_entity: graph::Index, text: &str) -> graph::Index {
+    let entity = g.insert_entity();
+    let atom = g.insert_atom(Atom::from(text));
+    let link = g.insert_link(atom, entity);
+    let _link_description = g.insert_link(name_entity, link);
     entity
 }
 
-fn set_test_data(db: &mut Database) {
-    let name = create_name_prop(db);
+fn set_test_data(g: &mut Graph) {
+    let name = create_name_prop(g);
 
-    let joe = create_named_entity(db, name, "joe");
-    let bob = create_named_entity(db, name, "bob");
+    let joe = create_named_entity(g, name, "joe");
+    let bob = create_named_entity(g, name, "bob");
 
-    let pj = create_named_entity(db, name, "pj");
-    db.insert(Object::link(pj, joe));
-    db.insert(Object::link(pj, bob));
+    let pj = create_named_entity(g, name, "pj");
+    g.insert_link(pj, joe);
+    g.insert_link(pj, bob);
 
-    let fight = create_named_entity(db, name, "fight");
-    let joe_in_fight = db.insert(Object::link(joe, fight));
-    let bob_in_fight = db.insert(Object::link(bob, fight));
+    let fight = create_named_entity(g, name, "fight");
+    let joe_in_fight = g.insert_link(joe, fight);
+    let bob_in_fight = g.insert_link(bob, fight);
 
-    let was_present = create_named_entity(db, name, "was_present");
-    db.insert(Object::link(was_present, joe_in_fight));
-    db.insert(Object::link(was_present, bob_in_fight));
+    let was_present = create_named_entity(g, name, "was_present");
+    g.insert_link(was_present, joe_in_fight);
+    g.insert_link(was_present, bob_in_fight);
 
-    let win = create_named_entity(db, name, "win");
-    db.insert(Object::link(win, bob_in_fight));
+    let win = create_named_entity(g, name, "win");
+    g.insert_link(win, bob_in_fight);
 
-    let date = create_named_entity(db, name, "date");
-    let some_date = db.insert(Object::Atom(Atom::Integer(2018)));
-    let fight_date = db.insert(Object::link(some_date, fight));
-    db.insert(Object::link(date, fight_date));
+    let date = create_named_entity(g, name, "date");
+    let some_date = g.insert_atom(Atom::Integer(2018));
+    let fight_date = g.insert_link(some_date, fight);
+    g.insert_link(date, fight_date);
 }
 
 fn main() {
-    let mut database = Database::new();
-    set_test_data(&mut database);
-    output_as_dot(&database.objects);
-
-    //let serialized = serde_json::to_string(&database).unwrap();
-    //println!("serialized = {}", serialized);
-    //
-    //    let deserialized: Database = serde_json::from_str(&serialized).unwrap();
-    //    // TODO to Database, check if it worked
-    //    output_as_dot(&deserialized.objects)
+    let mut graph = Graph::new();
+    set_test_data(&mut graph);
+    //output_as_dot(&graph);
 }
