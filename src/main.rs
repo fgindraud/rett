@@ -175,7 +175,7 @@ mod graph {
     }
 
     /// Data for each object.
-    /// In addition to the object, stored ids of links pointing from/to the object.
+    /// in_links/out_links: indexes of links pointing to/from this link.
     struct ObjectData<A> {
         object: Object<A>,
         in_links: Vec<Index>,
@@ -307,6 +307,12 @@ mod graph {
         pub fn out_links(&self) -> &'a Vec<Index> {
             &self.object_data.out_links
         }
+        pub fn is_link(&self) -> bool {
+            match self.object() {
+                &Object::Link(_) => true,
+                _ => false,
+            }
+        }
     }
 
     impl<'a, A: Eq + Hash + Clone> Iterator for OrderedObjectIterator<'a, A> {
@@ -348,11 +354,15 @@ fn output_as_dot(g: &Graph) {
     use std::collections::HashMap;
     use std::fmt;
 
-    /* Link arrow color selection.
+    /* Link handling.
      *
-     * Links are encoded as two consecutive arrows in Graphviz, with a dummy node in the middle.
-     * To improve readability, each link is given an arrow color different from neighbor links.
-     * This color is used for both Graphviz arrows.
+     * Links in a graph behave as objects and can have links pointing to them.
+     * This is not allowed in dot.
+     * Thus links with in_links()/out_links() are split into two Dot arrows with a dummy node.
+     *
+     * To improve readability, each link is given an arrow color.
+     * This arrow color must be different from in_links() and out_links().
+     * This ensures that both Dot edges can be easily recognized as part of the same link.
      *
      * Colors are selected from a fixed palette (generating one is complex).
      * This should be sufficient as theere are few conflicts in practice.
@@ -380,40 +390,61 @@ fn output_as_dot(g: &Graph) {
         }
     }
 
-    // Select a color
+    // Table to store color assignements for previously printed Links.
     let mut link_color_indexes: HashMap<graph::Index, usize> = HashMap::new();
-    let mut choose_link_color = |object_ref: &graph::ObjectRef<Atom>| {
-        let index = object_ref.index();
-        // Gather color indexes from neighbours with lesser indexes
-        let link_ends = match object_ref.object() {
-            &Object::Link(ref l) => [l.from, l.to], // FIXME only if they are links too
-            _ => panic!("must be a link"),
-        };
-        let neighbour_color_indexes = (object_ref.in_links().iter())
-            .chain(object_ref.out_links().iter())
-            .chain(link_ends.iter())
-            .filter(|&n| *n < index)
-            .map(|n| match link_color_indexes.get(n) {
-                Some(&color) => color,
-                None => panic!("link_color_indexes[{}] not found, index={}", n, index),
-            })
-            .collect::<Vec<_>>();
-        // Select first unused color index
-        let mut color_index = 0;
-        while neighbour_color_indexes.contains(&color_index) {
-            color_index += 1
+
+    // Select a color index for a link, assuming all lesser indexed Links have been colored.
+    let mut choose_color_index_for_link = |object_ref: &graph::ObjectRef<Atom>| {
+        if let &Object::Link(ref link) = object_ref.object() {
+            let index = object_ref.index();
+            // Build a list of colors of all links we are in conflict with
+            let conflicting_color_indexes = {
+                let mut conflicting_color_indexes = Vec::new();
+                {
+                    let mut conflict_with_color_of_link = |i: &graph::Index| {
+                        if *i < index {
+                            conflicting_color_indexes.push(link_color_indexes[i])
+                        }
+                    };
+                    // Conflicts with links we are pointing to/from
+                    if g.object(link.from).unwrap().is_link() {
+                        conflict_with_color_of_link(&link.from)
+                    };
+                    if g.object(link.to).unwrap().is_link() {
+                        conflict_with_color_of_link(&link.to)
+                    };
+                    // Conflicts with links that are pointing to/from us
+                    object_ref
+                        .in_links()
+                        .iter()
+                        .for_each(&mut conflict_with_color_of_link);
+                    object_ref
+                        .out_links()
+                        .iter()
+                        .for_each(&mut conflict_with_color_of_link);
+                }
+                conflicting_color_indexes
+            };
+            // Select first unused color index
+            let mut color_index = 0;
+            while conflicting_color_indexes.contains(&color_index) {
+                color_index += 1
+            }
+            assert!(
+                color_index <= color_palette.len(),
+                "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
+                color_index,
+                color_palette.len()
+            );
+            // Store it for next calls to choose_link_color()
+            link_color_indexes.insert(index, color_index);
+            color_index
+        } else {
+            panic!("object_ref must be a link");
         }
-        assert!(
-            color_index <= color_palette.len(),
-            "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
-            color_index,
-            color_palette.len()
-        );
-        // Store it for next calls to choose_link_color()
-        link_color_indexes.insert(index, color_index);
-        color_index
     };
 
+    // Output graph
     println!("digraph {{");
     for object_ref in g.objects() {
         let index = object_ref.index();
@@ -426,7 +457,7 @@ fn output_as_dot(g: &Graph) {
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
                 );
-                let color = color_palette[choose_link_color(&object_ref)];
+                let color = color_palette[choose_color_index_for_link(&object_ref)];
                 println!("\t{0} -> {1} [color=\"{2}\"];", link.from, index, color);
                 println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
             }
