@@ -347,15 +347,14 @@ impl<'a> From<&'a str> for Atom {
 
 type Graph = graph::Graph<Atom>;
 
+use std::io;
+use std::collections::HashMap;
+use std::fmt;
+
 ///*****************************************************************************
 /// Output graph as dot.
 
-use std::io;
-
 fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
-    use std::collections::HashMap;
-    use std::fmt;
-
     /* Link handling.
      *
      * Links in a graph behave as objects and can have links pointing to them.
@@ -485,11 +484,30 @@ fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
 
 /*******************************************************************************
  * Matching of graphs against each other.
- * TODO return map<Index (pattern graph), MatchResult (id in initial graph)>
+ * TODO return iterator over possible matches
  */
-enum MatchResult {
-    Failure,
-    Match(graph::Index),
+
+fn match_graph(
+    pattern: &Graph,
+    target: &Graph,
+) -> Option<HashMap<graph::Index, Option<graph::Index>>> {
+    let mut mapping = HashMap::new();
+
+    // Initialize all existing index in the mapping
+    // Also match atoms, which are unambiguous
+    for object_ref in pattern.objects() {
+        let matched = match object_ref.object() {
+            &graph::Object::Atom(ref a) => target.index_of_atom(a),
+            _ => None,
+        };
+        mapping.insert(object_ref.index(), matched);
+    }
+
+    // FIXME what if atom is not matched ? early failure ?
+
+    // Match the rest
+
+    Some(mapping)
 }
 
 /*******************************************************************************
@@ -544,5 +562,13 @@ fn main() {
     {
         let stdout = io::stdout();
         output_as_dot(&mut stdout.lock(), &graph);
+    }
+    {
+        let mut pattern = Graph::new();
+        let name_prop = create_name_prop(&mut pattern);
+
+        if let Some(mapping) = match_graph(&pattern, &graph) {
+            eprintln!("MAPPING {:?}", &mapping);
+        }
     }
 }
