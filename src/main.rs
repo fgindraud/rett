@@ -450,19 +450,29 @@ fn output_as_dot(g: &Graph) {
         let index = object_ref.index();
         match object_ref.object() {
             &Object::Atom(ref a) => {
-                println!("\t{0} [shape=box,label=\"{0} = {1}\"];", index, a);
+                println!("\t{0} [shape=box,label=\"{0}: {1}\"];", index, a);
             }
             &Object::Link(ref link) => {
-                println!(
+                let color = color_palette[choose_color_index_for_link(&object_ref)];
+                if object_ref.in_links().is_empty() && object_ref.out_links().is_empty() {
+                    println!(
+                        "\t{0} -> {1} [fontcolor=grey,color=\"{3}\",label=\"{2}\"];",
+                        link.from, link.to, index, color
+                    );
+                } else {
+                    println!(
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
                 );
-                let color = color_palette[choose_color_index_for_link(&object_ref)];
-                println!("\t{0} -> {1} [color=\"{2}\"];", link.from, index, color);
-                println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
+                    println!(
+                        "\t{0} -> {1} [dir=none,color=\"{2}\"];",
+                        link.from, index, color
+                    );
+                    println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
+                }
             }
             &Object::Entity(_) => {
-                println!("\t{0} [shape=box,label=\"{0}\"];", index);
+                println!("\t{0} [shape=hexagon,label=\"{0}\"];", index);
             }
         }
     }
