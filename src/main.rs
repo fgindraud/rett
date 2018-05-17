@@ -346,11 +346,13 @@ impl<'a> From<&'a str> for Atom {
 }
 
 type Graph = graph::Graph<Atom>;
-use graph::Object;
 
 ///*****************************************************************************
 /// Output graph as dot.
-fn output_as_dot(g: &Graph) {
+
+use std::io;
+
+fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
     use std::collections::HashMap;
     use std::fmt;
 
@@ -395,7 +397,7 @@ fn output_as_dot(g: &Graph) {
 
     // Select a color index for a link, assuming all lesser indexed Links have been colored.
     let mut choose_color_index_for_link = |object_ref: &graph::ObjectRef<Atom>| {
-        if let &Object::Link(ref link) = object_ref.object() {
+        if let &graph::Object::Link(ref link) = object_ref.object() {
             let index = object_ref.index();
             // Build a list of colors of all links we are in conflict with
             let conflicting_color_indexes = {
@@ -445,43 +447,50 @@ fn output_as_dot(g: &Graph) {
     };
 
     // Output graph
-    println!("digraph {{");
+    writeln!(out, "digraph {{")?;
     for object_ref in g.objects() {
         let index = object_ref.index();
         match object_ref.object() {
-            &Object::Atom(ref a) => {
-                println!("\t{0} [shape=box,label=\"{0}: {1}\"];", index, a);
+            &graph::Object::Atom(ref a) => {
+                writeln!(out, "\t{0} [shape=box,label=\"{0}: {1}\"];", index, a)?;
             }
-            &Object::Link(ref link) => {
+            &graph::Object::Link(ref link) => {
                 let color = color_palette[choose_color_index_for_link(&object_ref)];
                 if object_ref.in_links().is_empty() && object_ref.out_links().is_empty() {
-                    println!(
+                    writeln!(
+                        out,
                         "\t{0} -> {1} [fontcolor=grey,color=\"{3}\",label=\"{2}\"];",
                         link.from, link.to, index, color
-                    );
+                    )?;
                 } else {
-                    println!(
+                    writeln!(out,
                     "\t{0} [shape=none,fontcolor=grey,margin=0.02,height=0,width=0,label=\"{0}\"];",
                     index
-                );
-                    println!(
+                )?;
+                    writeln!(
+                        out,
                         "\t{0} -> {1} [dir=none,color=\"{2}\"];",
                         link.from, index, color
-                    );
-                    println!("\t{0} -> {1} [color=\"{2}\"];", index, link.to, color);
+                    )?;
+                    writeln!(out, "\t{0} -> {1} [color=\"{2}\"];", index, link.to, color)?;
                 }
             }
-            &Object::Entity(_) => {
-                println!("\t{0} [shape=hexagon,label=\"{0}\"];", index);
+            &graph::Object::Entity(_) => {
+                writeln!(out, "\t{0} [shape=hexagon,label=\"{0}\"];", index)?;
             }
         }
     }
-    println!("}}");
+    writeln!(out, "}}")
 }
 
 /*******************************************************************************
- * TODO queries, with hash map for referencing
+ * Matching of graphs against each other.
+ * TODO return map<Index (pattern graph), MatchResult (id in initial graph)>
  */
+enum MatchResult {
+    Failure,
+    Match(graph::Index),
+}
 
 /*******************************************************************************
  * Test
@@ -532,5 +541,8 @@ fn set_test_data(g: &mut Graph) {
 fn main() {
     let mut graph = Graph::new();
     set_test_data(&mut graph);
-    output_as_dot(&graph);
+    {
+        let stdout = io::stdout();
+        output_as_dot(&mut stdout.lock(), &graph);
+    }
 }
