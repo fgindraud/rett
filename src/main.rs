@@ -348,7 +348,7 @@ impl<'a> From<&'a str> for Atom {
 type Graph = graph::Graph<Atom>;
 
 use std::io;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 ///*****************************************************************************
@@ -492,7 +492,7 @@ fn match_graph(
     target: &Graph,
 ) -> Option<HashMap<graph::Index, Option<graph::Index>>> {
     let mut mapping = HashMap::new();
-    let mut matched_indexes_to_inspect = Vec::new();
+    let mut matched_indexes_to_inspect = HashSet::new();
 
     // Initialize all existing index in the mapping
     // Also match atoms, which are unambiguous
@@ -500,7 +500,7 @@ fn match_graph(
         let matched = match object_ref.object() {
             &graph::Object::Atom(ref a) => match target.index_of_atom(a) {
                 Some(target_index) => {
-                    matched_indexes_to_inspect.push(object_ref.index());
+                    matched_indexes_to_inspect.insert(object_ref.index());
                     Some(target_index)
                 }
                 None => return None, // Match error, early return
@@ -511,6 +511,12 @@ fn match_graph(
     }
 
     // Match the rest
+    let take_one = |set: &mut HashSet<_>| set.drain().next();
+    while let Some(matched_index) = take_one(&mut matched_indexes_to_inspect) {
+        eprintln!("TAKE {:?}", &matched_index);
+        // Match neighboring stuff that is unambiguous (and not matched)
+        // Add them to list of matched stuff
+    }
 
     Some(mapping)
 }
@@ -566,7 +572,7 @@ fn main() {
     set_test_data(&mut graph);
     {
         let stdout = io::stdout();
-        output_as_dot(&mut stdout.lock(), &graph);
+        output_as_dot(&mut stdout.lock(), &graph).unwrap();
     }
     {
         let mut pattern = Graph::new();
