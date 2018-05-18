@@ -492,18 +492,23 @@ fn match_graph(
     target: &Graph,
 ) -> Option<HashMap<graph::Index, Option<graph::Index>>> {
     let mut mapping = HashMap::new();
+    let mut matched_indexes_to_inspect = Vec::new();
 
     // Initialize all existing index in the mapping
     // Also match atoms, which are unambiguous
     for object_ref in pattern.objects() {
         let matched = match object_ref.object() {
-            &graph::Object::Atom(ref a) => target.index_of_atom(a),
+            &graph::Object::Atom(ref a) => match target.index_of_atom(a) {
+                Some(target_index) => {
+                    matched_indexes_to_inspect.push(object_ref.index());
+                    Some(target_index)
+                }
+                None => return None, // Match error, early return
+            },
             _ => None,
         };
         mapping.insert(object_ref.index(), matched);
     }
-
-    // FIXME what if atom is not matched ? early failure ?
 
     // Match the rest
 
@@ -567,8 +572,7 @@ fn main() {
         let mut pattern = Graph::new();
         let name_prop = create_name_prop(&mut pattern);
 
-        if let Some(mapping) = match_graph(&pattern, &graph) {
-            eprintln!("MAPPING {:?}", &mapping);
-        }
+        let mapping = match_graph(&pattern, &graph);
+        eprintln!("MAPPING {:?}", &mapping);
     }
 }
