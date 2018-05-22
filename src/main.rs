@@ -146,9 +146,9 @@ mod slot_vec {
 ///*****************************************************************************
 /// Define a knowledge graph
 mod graph {
-    use std::hash::Hash;
-    use std::collections::HashMap;
     use slot_vec::SlotVec;
+    use std::collections::HashMap;
+    use std::hash::Hash;
 
     /// Opaque Index type for graph elements
     #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
@@ -347,9 +347,9 @@ impl<'a> From<&'a str> for Atom {
 
 type Graph = graph::Graph<Atom>;
 
-use std::io;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::io;
 
 ///*****************************************************************************
 /// Output graph as dot.
@@ -487,27 +487,21 @@ fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
  * TODO return iterator over possible matches
  */
 
-fn match_graph(
-    pattern: &Graph,
-    target: &Graph,
-) -> Option<HashMap<graph::Index, Option<graph::Index>>> {
+fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, graph::Index>> {
+    // TODO wrap in struct
+    // methods:
+    // check_or_add(pattern_id, target_id) -> bool
     let mut mapping = HashMap::new();
     let mut matched_indexes_to_inspect = HashSet::new();
 
-    // Initialize all existing index in the mapping
-    // Also match atoms, which are unambiguous
+    // Match atoms, which are unambiguous
     for object_ref in pattern.objects() {
-        let matched = match object_ref.object() {
-            &graph::Object::Atom(ref a) => match target.index_of_atom(a) {
-                Some(target_index) => {
-                    matched_indexes_to_inspect.insert(object_ref.index());
-                    Some(target_index)
-                }
-                None => return None, // Match error, early return
-            },
-            _ => None,
-        };
-        mapping.insert(object_ref.index(), matched);
+        if let &graph::Object::Atom(ref a) = object_ref.object() {
+            if let Some(target_index) = target.index_of_atom(a) {
+                matched_indexes_to_inspect.insert(object_ref.index());
+                mapping.insert(object_ref.index(), target_index);
+            }
+        }
     }
 
     // Match the rest
@@ -516,6 +510,36 @@ fn match_graph(
         eprintln!("TAKE {:?}", &matched_index);
         // Match neighboring stuff that is unambiguous (and not matched)
         // Add them to list of matched stuff
+        let pattern_object_ref = pattern.object(matched_index).unwrap();
+        let matched_object_ref = target.object(mapping[&matched_index]).unwrap();
+
+        // Match in_links if unique between pair of matched elements
+        if pattern_object_ref.in_links().len() == 1 && matched_object_ref.in_links().len() == 1 {
+            let pattern_in_link = pattern_object_ref.in_links()[0];
+            let matched_in_link = matched_object_ref.in_links()[0];
+            if !mapping.contains_key(&pattern_in_link) {
+                mapping.insert(pattern_in_link, matched_in_link);
+                matched_indexes_to_inspect.insert(pattern_in_link);
+            }
+        }
+        // Match out_links if unique between pair of matched elements
+        if pattern_object_ref.out_links().len() == 1 && matched_object_ref.out_links().len() == 1 {
+            let pattern_out_link = pattern_object_ref.out_links()[0];
+            let matched_out_link = matched_object_ref.out_links()[0];
+            if !mapping.contains_key(&pattern_out_link) {
+                mapping.insert(pattern_out_link, matched_out_link);
+                matched_indexes_to_inspect.insert(pattern_out_link);
+            }
+        }
+
+        // Match ends if matched object is link
+        if let &graph::Object::Link(ref pattern_link) = pattern_object_ref.object() {
+            if let &graph::Object::Link(ref matched_link) = matched_object_ref.object() {
+                // From
+            } else {
+                return None; // Must be a link
+            }
+        }
     }
 
     Some(mapping)
