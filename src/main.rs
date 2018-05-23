@@ -357,8 +357,16 @@ use std::io;
 
 ///*****************************************************************************
 /// Output graph as dot.
+///
+/// Added basic filtering.
+/// TODO improve it. Problem: some referenced elements are not pretty printed.
+/// Notion of graph view (partial) ?
 
-fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
+fn output_as_dot_filtered(
+    out: &mut io::Write,
+    g: &Graph,
+    elements: &HashSet<graph::Index>,
+) -> io::Result<()> {
     /* Link handling.
      *
      * Links in a graph behave as objects and can have links pointing to them.
@@ -451,7 +459,9 @@ fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
 
     // Output graph
     writeln!(out, "digraph {{")?;
-    for object_ref in g.objects() {
+    for object_ref in g.objects()
+        .filter(|object_ref| elements.contains(&object_ref.index()))
+    {
         let index = object_ref.index();
         match object_ref.object() {
             &graph::Object::Atom(ref a) => {
@@ -484,6 +494,13 @@ fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
         }
     }
     writeln!(out, "}}")
+}
+
+fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
+    let all_elements = g.objects()
+        .map(|object_ref| object_ref.index())
+        .collect::<HashSet<_>>();
+    output_as_dot_filtered(out, g, &all_elements)
 }
 
 /*******************************************************************************
@@ -535,7 +552,6 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
 
     // Match the rest
     while let Some(matched_pattern_object) = mapping.next_matched_pattern_object_to_inspect() {
-        eprintln!("TAKE {:?}", &matched_pattern_object);
         // Match neighboring stuff that is unambiguous (and not matched)
         // Add them to list of matched stuff
         let matched_pattern_object_ref = pattern.object(matched_pattern_object);
@@ -625,19 +641,18 @@ fn set_test_data(g: &mut Graph) {
 fn main() {
     let mut graph = Graph::new();
     set_test_data(&mut graph);
-    {
-        let stdout = io::stdout();
-        output_as_dot(&mut stdout.lock(), &graph).unwrap();
-    }
-    {
+    //output_as_dot(&mut io::stdout(), &graph).unwrap();
+    if false {
         let mut pattern = Graph::new();
         let name_prop = create_name_prop(&mut pattern);
 
         let mapping = match_graph(&pattern, &graph);
         eprintln!("MAPPING {:?}", &mapping);
     }
-    if false {
-        let mapping = match_graph(&graph, &graph);
-        eprintln!("MAPPING {:?}", &mapping);
+    {
+        // Print the matched part of graph
+        let self_mapping = match_graph(&graph, &graph).expect("match failure");
+        let matched_elements = self_mapping.keys().cloned().collect::<HashSet<_>>();
+        output_as_dot_filtered(&mut io::stdout(), &graph, &matched_elements);
     }
 }
