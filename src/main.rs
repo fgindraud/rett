@@ -252,11 +252,11 @@ mod graph {
 
         /// Get index of an atom, or None if not found.
         pub fn index_of_atom(&self, atom: &A) -> Option<Index> {
-            self.atom_indexes.get(&atom).map(|index_ref| *index_ref)
+            self.atom_indexes.get(&atom).cloned()
         }
         /// Get index of a link, or None if not found.
         pub fn index_of_link(&self, link: &Link) -> Option<Index> {
-            self.link_indexes.get(&link).map(|index_ref| *index_ref)
+            self.link_indexes.get(&link).cloned()
         }
 
         /// Insert a new atom, return its index.
@@ -359,7 +359,7 @@ use std::io;
 /// Output graph as dot.
 ///
 /// Added basic filtering.
-/// TODO improve it. Problem: some referenced elements are not pretty printed.
+/// TODO improve it.
 /// Notion of graph view (partial) ?
 
 fn output_as_dot_filtered(
@@ -403,58 +403,59 @@ fn output_as_dot_filtered(
         }
     }
 
-    // Table to store color assignements for previously printed Links.
-    let mut link_color_indexes: HashMap<graph::Index, usize> = HashMap::new();
+    let link_color_indexes = {
+        // Table to store color assignements for previously colored Links.
+        let mut link_color_indexes: HashMap<graph::Index, usize> = HashMap::new();
 
-    // Select a color index for a link, assuming all lesser indexed Links have been colored.
-    let mut choose_color_index_for_link = |object_ref: &graph::ObjectRef<Atom>| {
-        if let &graph::Object::Link(ref link) = object_ref.object() {
-            let index = object_ref.index();
-            // Build a list of colors of all links we are in conflict with
-            let conflicting_color_indexes = {
-                let mut conflicting_color_indexes = Vec::new();
-                {
-                    let mut conflict_with_color_of_link = |i: &graph::Index| {
-                        if *i < index {
-                            conflicting_color_indexes.push(link_color_indexes[i])
-                        }
-                    };
-                    // Conflicts with links we are pointing to/from
-                    if g.object(link.from).is_link() {
-                        conflict_with_color_of_link(&link.from)
-                    };
-                    if g.object(link.to).is_link() {
-                        conflict_with_color_of_link(&link.to)
-                    };
-                    // Conflicts with links that are pointing to/from us
-                    object_ref
-                        .in_links()
-                        .iter()
-                        .for_each(&mut conflict_with_color_of_link);
-                    object_ref
-                        .out_links()
-                        .iter()
-                        .for_each(&mut conflict_with_color_of_link);
+        for object_ref in g.objects() {
+            // Select a color index for a link, assuming all lesser indexed Links have been colored.
+            if let &graph::Object::Link(ref link) = object_ref.object() {
+                let index = object_ref.index();
+                // Build a list of colors of all links we are in conflict with
+                let conflicting_color_indexes = {
+                    let mut conflicting_color_indexes = Vec::new();
+                    {
+                        let mut conflict_with_color_of_link = |i: &graph::Index| {
+                            if *i < index {
+                                conflicting_color_indexes.push(link_color_indexes[i])
+                            }
+                        };
+                        // Conflicts with links we are pointing to/from
+                        if g.object(link.from).is_link() {
+                            conflict_with_color_of_link(&link.from)
+                        };
+                        if g.object(link.to).is_link() {
+                            conflict_with_color_of_link(&link.to)
+                        };
+                        // Conflicts with links that are pointing to/from us
+                        object_ref
+                            .in_links()
+                            .iter()
+                            .for_each(&mut conflict_with_color_of_link);
+                        object_ref
+                            .out_links()
+                            .iter()
+                            .for_each(&mut conflict_with_color_of_link);
+                    }
+                    conflicting_color_indexes
+                };
+                // Select first unused color index
+                let mut color_index = 0;
+                while conflicting_color_indexes.contains(&color_index) {
+                    color_index += 1
                 }
-                conflicting_color_indexes
-            };
-            // Select first unused color index
-            let mut color_index = 0;
-            while conflicting_color_indexes.contains(&color_index) {
-                color_index += 1
+                assert!(
+                    color_index <= color_palette.len(),
+                    "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
+                    color_index,
+                    color_palette.len()
+                );
+                // Store it for next calls to choose_link_color()
+                link_color_indexes.insert(index, color_index);
             }
-            assert!(
-                color_index <= color_palette.len(),
-                "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
-                color_index,
-                color_palette.len()
-            );
-            // Store it for next calls to choose_link_color()
-            link_color_indexes.insert(index, color_index);
-            color_index
-        } else {
-            panic!("object_ref must be a link");
         }
+
+        link_color_indexes
     };
 
     // Output graph
@@ -468,7 +469,7 @@ fn output_as_dot_filtered(
                 writeln!(out, "\t{0} [shape=box,label=\"{0}: {1}\"];", index, a)?;
             }
             &graph::Object::Link(ref link) => {
-                let color = color_palette[choose_color_index_for_link(&object_ref)];
+                let color = color_palette[link_color_indexes[&index]];
                 if object_ref.in_links().is_empty() && object_ref.out_links().is_empty() {
                     writeln!(
                         out,
@@ -534,7 +535,17 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
         }
 
         fn next_matched_pattern_object_to_inspect(&mut self) -> Option<graph::Index> {
-            self.matched_pattern_objects_to_inspect.drain().next()
+            match self.matched_pattern_objects_to_inspect
+                .iter()
+                .cloned()
+                .next()
+            {
+                Some(index) => {
+                    self.matched_pattern_objects_to_inspect.remove(&index);
+                    Some(index)
+                }
+                None => None,
+            }
         }
     }
 
@@ -548,6 +559,9 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
             }
         }
     }
+
+    // FIXME debug
+    let mut iteration = 0;
 
     // Match the rest
     while let Some(matched_pattern_object) = mapping.next_matched_pattern_object_to_inspect() {
@@ -591,6 +605,23 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
             } else {
                 return None; // Must be a link
             }
+        }
+
+        // FIXME DEBUG
+        {
+            use std::fs;
+            let mut file = fs::File::create(format!(
+                "debug/match_{:03}_inspecting_{}.dot",
+                iteration,
+                matched_pattern_object.to_usize()
+            )).unwrap();
+
+            let mapping = &mapping.mapping;
+
+            let matched_elements: HashSet<graph::Index> = mapping.keys().cloned().collect();
+            output_as_dot_filtered(&mut file, &pattern, &matched_elements).unwrap();
+
+            iteration += 1;
         }
     }
 
@@ -666,7 +697,6 @@ fn main() {
     if args.iter().any(|s| s == "self") {
         // Print the matched part of graph
         let self_mapping = match_graph(&graph, &graph).expect("match failure");
-        eprintln!("MAPPING {:?}", &self_mapping);
         let matched_elements: HashSet<graph::Index> = self_mapping.keys().cloned().collect();
         output_as_dot_filtered(&mut io::stdout(), &graph, &matched_elements).unwrap();
     }
