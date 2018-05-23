@@ -488,53 +488,83 @@ fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
  */
 
 fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, graph::Index>> {
-    // TODO wrap in struct
-    // methods:
-    // check_or_add(pattern_id, target_id) -> bool
-    let mut mapping = HashMap::new();
-    let mut matched_indexes_to_inspect = HashSet::new();
+    // Used to build a mapping iteratively
+    struct MappingBuilder {
+        mapping: HashMap<graph::Index, graph::Index>,
+        matched_pattern_objects_to_inspect: HashSet<graph::Index>,
+    }
+    impl MappingBuilder {
+        fn new() -> Self {
+            MappingBuilder {
+                mapping: HashMap::new(),
+                matched_pattern_objects_to_inspect: HashSet::new(),
+            }
+        }
+
+        // Returns true if ok, false if conflicts with current matching
+        fn add(&mut self, pattern_object: graph::Index, target_object: graph::Index) -> bool {
+            if let Some(&current_matched_target_object) = self.mapping.get(&pattern_object) {
+                current_matched_target_object == target_object
+            } else {
+                self.mapping.insert(pattern_object, target_object);
+                self.matched_pattern_objects_to_inspect
+                    .insert(pattern_object);
+                true
+            }
+        }
+
+        fn next_matched_pattern_object_to_inspect(&mut self) -> Option<graph::Index> {
+            self.matched_pattern_objects_to_inspect.drain().next()
+        }
+    }
+
+    let mut mapping = MappingBuilder::new();
 
     // Match atoms, which are unambiguous
-    for object_ref in pattern.objects() {
-        if let &graph::Object::Atom(ref a) = object_ref.object() {
-            if let Some(target_index) = target.index_of_atom(a) {
-                matched_indexes_to_inspect.insert(object_ref.index());
-                mapping.insert(object_ref.index(), target_index);
+    for pattern_object_ref in pattern.objects() {
+        if let &graph::Object::Atom(ref a) = pattern_object_ref.object() {
+            if let Some(target_object) = target.index_of_atom(a) {
+                mapping.add(pattern_object_ref.index(), target_object);
             }
         }
     }
 
     // Match the rest
-    let take_one = |set: &mut HashSet<_>| set.drain().next();
-    while let Some(matched_index) = take_one(&mut matched_indexes_to_inspect) {
-        eprintln!("TAKE {:?}", &matched_index);
+    while let Some(matched_pattern_object) = mapping.next_matched_pattern_object_to_inspect() {
+        eprintln!("TAKE {:?}", &matched_pattern_object);
         // Match neighboring stuff that is unambiguous (and not matched)
         // Add them to list of matched stuff
-        let pattern_object_ref = pattern.object(matched_index).unwrap();
-        let matched_object_ref = target.object(mapping[&matched_index]).unwrap();
+        let matched_pattern_object_ref = pattern.object(matched_pattern_object).unwrap();
+        let matched_target_object_ref = target
+            .object(mapping.mapping[&matched_pattern_object])
+            .unwrap();
 
         // Match in_links if unique between pair of matched elements
-        if pattern_object_ref.in_links().len() == 1 && matched_object_ref.in_links().len() == 1 {
-            let pattern_in_link = pattern_object_ref.in_links()[0];
-            let matched_in_link = matched_object_ref.in_links()[0];
-            if !mapping.contains_key(&pattern_in_link) {
-                mapping.insert(pattern_in_link, matched_in_link);
-                matched_indexes_to_inspect.insert(pattern_in_link);
+        if matched_pattern_object_ref.in_links().len() == 1
+            && matched_target_object_ref.in_links().len() == 1
+        {
+            if !mapping.add(
+                matched_pattern_object_ref.in_links()[0],
+                matched_target_object_ref.in_links()[0],
+            ) {
+                return None;
             }
         }
         // Match out_links if unique between pair of matched elements
-        if pattern_object_ref.out_links().len() == 1 && matched_object_ref.out_links().len() == 1 {
-            let pattern_out_link = pattern_object_ref.out_links()[0];
-            let matched_out_link = matched_object_ref.out_links()[0];
-            if !mapping.contains_key(&pattern_out_link) {
-                mapping.insert(pattern_out_link, matched_out_link);
-                matched_indexes_to_inspect.insert(pattern_out_link);
+        if matched_pattern_object_ref.out_links().len() == 1
+            && matched_target_object_ref.out_links().len() == 1
+        {
+            if !mapping.add(
+                matched_pattern_object_ref.out_links()[0],
+                matched_target_object_ref.out_links()[0],
+            ) {
+                return None;
             }
         }
 
         // Match ends if matched object is link
-        if let &graph::Object::Link(ref pattern_link) = pattern_object_ref.object() {
-            if let &graph::Object::Link(ref matched_link) = matched_object_ref.object() {
+        if let &graph::Object::Link(ref pattern_link) = matched_pattern_object_ref.object() {
+            if let &graph::Object::Link(ref matched_link) = matched_target_object_ref.object() {
                 // From
             } else {
                 return None; // Must be a link
@@ -542,7 +572,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
         }
     }
 
-    Some(mapping)
+    Some(mapping.mapping)
 }
 
 /*******************************************************************************
