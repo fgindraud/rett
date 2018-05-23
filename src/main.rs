@@ -208,6 +208,21 @@ mod graph {
         }
     }
 
+    impl<A> Object<A> {
+        pub fn is_link(&self) -> bool {
+            match self {
+                &Object::Link(_) => true,
+                _ => false,
+            }
+        }
+        pub fn as_link(&self) -> &Link {
+            match self {
+                &Object::Link(ref l) => l,
+                _ => panic!("not a link"),
+            }
+        }
+    }
+
     impl<A> ObjectData<A> {
         fn new(object: Object<A>) -> Self {
             ObjectData {
@@ -310,12 +325,6 @@ mod graph {
         }
         pub fn out_links(&self) -> &'a Vec<Index> {
             &self.object_data.out_links
-        }
-        pub fn is_link(&self) -> bool {
-            match self.object() {
-                &Object::Link(_) => true,
-                _ => false,
-            }
         }
     }
 
@@ -421,10 +430,10 @@ fn output_as_dot_filtered(
                             }
                         };
                         // Conflicts with links we are pointing to/from
-                        if g.object(link.from).is_link() {
+                        if g.object(link.from).object().is_link() {
                             conflict_with_color_of_link(&link.from)
                         };
-                        if g.object(link.to).is_link() {
+                        if g.object(link.to).object().is_link() {
                             conflict_with_color_of_link(&link.to)
                         };
                         // Conflicts with links that are pointing to/from us
@@ -534,6 +543,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
             }
         }
 
+        // Pick one from matched_pattern_objects_to_inspect set
         fn next_matched_pattern_object_to_inspect(&mut self) -> Option<graph::Index> {
             match self.matched_pattern_objects_to_inspect
                 .iter()
@@ -591,20 +601,18 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
 
         // Match ends if matched object is link
         if let &graph::Object::Link(ref pattern_link) = matched_pattern_object_ref.object() {
-            if let &graph::Object::Link(ref target_link) = matched_target_object_ref.object() {
-                // Match from/to objects
-                if !mapping.add(pattern_link.from, target_link.from) {
-                    return None;
-                }
-                if !mapping.add(pattern_link.to, target_link.to) {
-                    return None;
-                }
-            } else {
-                return None; // Must be a link
+            let target_link = matched_target_object_ref.object().as_link();
+
+            // Match from/to objects
+            if !mapping.add(pattern_link.from, target_link.from) {
+                return None;
+            }
+            if !mapping.add(pattern_link.to, target_link.to) {
+                return None;
             }
         }
 
-        // TODO: match in/out links if their other end is matched too.
+        // TODO Match in/out links if their other end is matched too
     }
 
     Some(mapping.mapping)
