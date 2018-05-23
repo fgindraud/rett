@@ -560,9 +560,6 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
         }
     }
 
-    // FIXME debug
-    let mut iteration = 0;
-
     // Match the rest
     while let Some(matched_pattern_object) = mapping.next_matched_pattern_object_to_inspect() {
         // Match neighboring stuff that is unambiguous (and not matched)
@@ -607,22 +604,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
             }
         }
 
-        // FIXME DEBUG
-        {
-            use std::fs;
-            let mut file = fs::File::create(format!(
-                "debug/match_{:03}_inspecting_{}.dot",
-                iteration,
-                matched_pattern_object.to_usize()
-            )).unwrap();
-
-            let mapping = &mapping.mapping;
-
-            let matched_elements: HashSet<graph::Index> = mapping.keys().cloned().collect();
-            output_as_dot_filtered(&mut file, &pattern, &matched_elements).unwrap();
-
-            iteration += 1;
-        }
+        // TODO: match in/out links if their other end is matched too.
     }
 
     Some(mapping.mapping)
