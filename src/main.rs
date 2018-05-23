@@ -228,14 +228,18 @@ mod graph {
             }
         }
 
-        /// Get object
-        pub fn object<'a>(&'a self, index: Index) -> Option<ObjectRef<'a, A>> {
+        /// Get object, index may be unattributed
+        pub fn get_object<'a>(&'a self, index: Index) -> Option<ObjectRef<'a, A>> {
             self.objects
                 .get(index.to_usize())
                 .map(|object_data| ObjectRef {
                     index: index,
                     object_data: object_data,
                 })
+        }
+        /// Get object, assume valid index
+        pub fn object<'a>(&'a self, index: Index) -> ObjectRef<'a, A> {
+            self.get_object(index).expect("invalid index")
         }
 
         /// Iterate on valid objects
@@ -324,7 +328,7 @@ mod graph {
                     return None;
                 };
                 self.next_index = current_index + 1;
-                if let Some(object_ref) = self.graph.object(Index(current_index)) {
+                if let Some(object_ref) = self.graph.get_object(Index(current_index)) {
                     return Some(object_ref);
                 }
             }
@@ -408,10 +412,10 @@ fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
                         }
                     };
                     // Conflicts with links we are pointing to/from
-                    if g.object(link.from).unwrap().is_link() {
+                    if g.object(link.from).is_link() {
                         conflict_with_color_of_link(&link.from)
                     };
-                    if g.object(link.to).unwrap().is_link() {
+                    if g.object(link.to).is_link() {
                         conflict_with_color_of_link(&link.to)
                     };
                     // Conflicts with links that are pointing to/from us
@@ -534,12 +538,10 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
         eprintln!("TAKE {:?}", &matched_pattern_object);
         // Match neighboring stuff that is unambiguous (and not matched)
         // Add them to list of matched stuff
-        let matched_pattern_object_ref = pattern.object(matched_pattern_object).unwrap();
-        let matched_target_object_ref = target
-            .object(mapping.mapping[&matched_pattern_object])
-            .unwrap();
+        let matched_pattern_object_ref = pattern.object(matched_pattern_object);
+        let matched_target_object_ref = target.object(mapping.mapping[&matched_pattern_object]);
 
-        // Match in_links if unique between pair of matched elements
+        // Match in_links/out_links if unique between pair of matched elements
         if matched_pattern_object_ref.in_links().len() == 1
             && matched_target_object_ref.in_links().len() == 1
         {
@@ -550,7 +552,6 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
                 return None;
             }
         }
-        // Match out_links if unique between pair of matched elements
         if matched_pattern_object_ref.out_links().len() == 1
             && matched_target_object_ref.out_links().len() == 1
         {
@@ -633,6 +634,10 @@ fn main() {
         let name_prop = create_name_prop(&mut pattern);
 
         let mapping = match_graph(&pattern, &graph);
+        eprintln!("MAPPING {:?}", &mapping);
+    }
+    if false {
+        let mapping = match_graph(&graph, &graph);
         eprintln!("MAPPING {:?}", &mapping);
     }
 }
