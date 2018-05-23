@@ -497,9 +497,8 @@ fn output_as_dot_filtered(
 }
 
 fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
-    let all_elements = g.objects()
-        .map(|object_ref| object_ref.index())
-        .collect::<HashSet<_>>();
+    let all_elements: HashSet<graph::Index> =
+        g.objects().map(|object_ref| object_ref.index()).collect();
     output_as_dot_filtered(out, g, &all_elements)
 }
 
@@ -581,8 +580,14 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
 
         // Match ends if matched object is link
         if let &graph::Object::Link(ref pattern_link) = matched_pattern_object_ref.object() {
-            if let &graph::Object::Link(ref matched_link) = matched_target_object_ref.object() {
-                // From
+            if let &graph::Object::Link(ref target_link) = matched_target_object_ref.object() {
+                // Match from/to objects
+                if !mapping.add(pattern_link.from, target_link.from) {
+                    return None;
+                }
+                if !mapping.add(pattern_link.to, target_link.to) {
+                    return None;
+                }
             } else {
                 return None; // Must be a link
             }
@@ -638,21 +643,31 @@ fn set_test_data(g: &mut Graph) {
     g.insert_link(date, fight_date);
 }
 
+use std::env;
+
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
     let mut graph = Graph::new();
     set_test_data(&mut graph);
-    //output_as_dot(&mut io::stdout(), &graph).unwrap();
-    if false {
+
+    if args.iter().any(|s| s == "graph") {
+        output_as_dot(&mut io::stdout(), &graph).unwrap()
+    }
+
+    if args.iter().any(|s| s == "pattern") {
         let mut pattern = Graph::new();
         let name_prop = create_name_prop(&mut pattern);
 
         let mapping = match_graph(&pattern, &graph);
         eprintln!("MAPPING {:?}", &mapping);
     }
-    {
+
+    if args.iter().any(|s| s == "self") {
         // Print the matched part of graph
         let self_mapping = match_graph(&graph, &graph).expect("match failure");
-        let matched_elements = self_mapping.keys().cloned().collect::<HashSet<_>>();
-        output_as_dot_filtered(&mut io::stdout(), &graph, &matched_elements);
+        eprintln!("MAPPING {:?}", &self_mapping);
+        let matched_elements: HashSet<graph::Index> = self_mapping.keys().cloned().collect();
+        output_as_dot_filtered(&mut io::stdout(), &graph, &matched_elements).unwrap();
     }
 }
