@@ -208,6 +208,21 @@ mod graph {
         }
     }
 
+    impl<A> Object<A> {
+        pub fn is_link(&self) -> bool {
+            match self {
+                &Object::Link(_) => true,
+                _ => false,
+            }
+        }
+        pub fn as_link(&self) -> &Link {
+            match self {
+                &Object::Link(ref l) => l,
+                _ => panic!("not a link"),
+            }
+        }
+    }
+
     impl<A> ObjectData<A> {
         fn new(object: Object<A>) -> Self {
             ObjectData {
@@ -228,14 +243,18 @@ mod graph {
             }
         }
 
-        /// Get object
-        pub fn object<'a>(&'a self, index: Index) -> Option<ObjectRef<'a, A>> {
+        /// Get object, index may be unattributed
+        pub fn get_object<'a>(&'a self, index: Index) -> Option<ObjectRef<'a, A>> {
             self.objects
                 .get(index.to_usize())
                 .map(|object_data| ObjectRef {
                     index: index,
                     object_data: object_data,
                 })
+        }
+        /// Get object, assume valid index
+        pub fn object<'a>(&'a self, index: Index) -> ObjectRef<'a, A> {
+            self.get_object(index).expect("invalid index")
         }
 
         /// Iterate on valid objects
@@ -248,11 +267,11 @@ mod graph {
 
         /// Get index of an atom, or None if not found.
         pub fn index_of_atom(&self, atom: &A) -> Option<Index> {
-            self.atom_indexes.get(&atom).map(|index_ref| *index_ref)
+            self.atom_indexes.get(&atom).cloned()
         }
         /// Get index of a link, or None if not found.
         pub fn index_of_link(&self, link: &Link) -> Option<Index> {
-            self.link_indexes.get(&link).map(|index_ref| *index_ref)
+            self.link_indexes.get(&link).cloned()
         }
 
         /// Insert a new atom, return its index.
@@ -307,12 +326,6 @@ mod graph {
         pub fn out_links(&self) -> &'a Vec<Index> {
             &self.object_data.out_links
         }
-        pub fn is_link(&self) -> bool {
-            match self.object() {
-                &Object::Link(_) => true,
-                _ => false,
-            }
-        }
     }
 
     impl<'a, A: Eq + Hash + Clone> Iterator for OrderedObjectIterator<'a, A> {
@@ -324,7 +337,7 @@ mod graph {
                     return None;
                 };
                 self.next_index = current_index + 1;
-                if let Some(object_ref) = self.graph.object(Index(current_index)) {
+                if let Some(object_ref) = self.graph.get_object(Index(current_index)) {
                     return Some(object_ref);
                 }
             }
@@ -335,7 +348,7 @@ mod graph {
 ///*****************************************************************************
 /// Atom: represents a basic piece of data (integer, string, etc)
 #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-enum Atom {
+pub enum Atom {
     String(String),
     Integer(i32),
 }
@@ -353,8 +366,16 @@ use std::io;
 
 ///*****************************************************************************
 /// Output graph as dot.
+///
+/// Added basic filtering.
+/// TODO improve it.
+/// Notion of graph view (partial) ?
 
-fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
+fn output_as_dot_filtered(
+    out: &mut io::Write,
+    g: &Graph,
+    elements: &HashSet<graph::Index>,
+) -> io::Result<()> {
     /* Link handling.
      *
      * Links in a graph behave as objects and can have links pointing to them.
@@ -391,70 +412,73 @@ fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
         }
     }
 
-    // Table to store color assignements for previously printed Links.
-    let mut link_color_indexes: HashMap<graph::Index, usize> = HashMap::new();
+    let link_color_indexes = {
+        // Table to store color assignements for previously colored Links.
+        let mut link_color_indexes: HashMap<graph::Index, usize> = HashMap::new();
 
-    // Select a color index for a link, assuming all lesser indexed Links have been colored.
-    let mut choose_color_index_for_link = |object_ref: &graph::ObjectRef<Atom>| {
-        if let &graph::Object::Link(ref link) = object_ref.object() {
-            let index = object_ref.index();
-            // Build a list of colors of all links we are in conflict with
-            let conflicting_color_indexes = {
-                let mut conflicting_color_indexes = Vec::new();
-                {
-                    let mut conflict_with_color_of_link = |i: &graph::Index| {
-                        if *i < index {
-                            conflicting_color_indexes.push(link_color_indexes[i])
-                        }
-                    };
-                    // Conflicts with links we are pointing to/from
-                    if g.object(link.from).unwrap().is_link() {
-                        conflict_with_color_of_link(&link.from)
-                    };
-                    if g.object(link.to).unwrap().is_link() {
-                        conflict_with_color_of_link(&link.to)
-                    };
-                    // Conflicts with links that are pointing to/from us
-                    object_ref
-                        .in_links()
-                        .iter()
-                        .for_each(&mut conflict_with_color_of_link);
-                    object_ref
-                        .out_links()
-                        .iter()
-                        .for_each(&mut conflict_with_color_of_link);
+        for object_ref in g.objects() {
+            // Select a color index for a link, assuming all lesser indexed Links have been colored.
+            if let &graph::Object::Link(ref link) = object_ref.object() {
+                let index = object_ref.index();
+                // Build a list of colors of all links we are in conflict with
+                let conflicting_color_indexes = {
+                    let mut conflicting_color_indexes = Vec::new();
+                    {
+                        let mut conflict_with_color_of_link = |i: &graph::Index| {
+                            if *i < index {
+                                conflicting_color_indexes.push(link_color_indexes[i])
+                            }
+                        };
+                        // Conflicts with links we are pointing to/from
+                        if g.object(link.from).object().is_link() {
+                            conflict_with_color_of_link(&link.from)
+                        };
+                        if g.object(link.to).object().is_link() {
+                            conflict_with_color_of_link(&link.to)
+                        };
+                        // Conflicts with links that are pointing to/from us
+                        object_ref
+                            .in_links()
+                            .iter()
+                            .for_each(&mut conflict_with_color_of_link);
+                        object_ref
+                            .out_links()
+                            .iter()
+                            .for_each(&mut conflict_with_color_of_link);
+                    }
+                    conflicting_color_indexes
+                };
+                // Select first unused color index
+                let mut color_index = 0;
+                while conflicting_color_indexes.contains(&color_index) {
+                    color_index += 1
                 }
-                conflicting_color_indexes
-            };
-            // Select first unused color index
-            let mut color_index = 0;
-            while conflicting_color_indexes.contains(&color_index) {
-                color_index += 1
+                assert!(
+                    color_index <= color_palette.len(),
+                    "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
+                    color_index,
+                    color_palette.len()
+                );
+                // Store it for next calls to choose_link_color()
+                link_color_indexes.insert(index, color_index);
             }
-            assert!(
-                color_index <= color_palette.len(),
-                "output_as_dot: nb_colors = {} exceeds the color palette size ({})",
-                color_index,
-                color_palette.len()
-            );
-            // Store it for next calls to choose_link_color()
-            link_color_indexes.insert(index, color_index);
-            color_index
-        } else {
-            panic!("object_ref must be a link");
         }
+
+        link_color_indexes
     };
 
     // Output graph
     writeln!(out, "digraph {{")?;
-    for object_ref in g.objects() {
+    for object_ref in g.objects()
+        .filter(|object_ref| elements.contains(&object_ref.index()))
+    {
         let index = object_ref.index();
         match object_ref.object() {
             &graph::Object::Atom(ref a) => {
                 writeln!(out, "\t{0} [shape=box,label=\"{0}: {1}\"];", index, a)?;
             }
             &graph::Object::Link(ref link) => {
-                let color = color_palette[choose_color_index_for_link(&object_ref)];
+                let color = color_palette[link_color_indexes[&index]];
                 if object_ref.in_links().is_empty() && object_ref.out_links().is_empty() {
                     writeln!(
                         out,
@@ -482,67 +506,116 @@ fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
     writeln!(out, "}}")
 }
 
+fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
+    let all_elements: HashSet<graph::Index> =
+        g.objects().map(|object_ref| object_ref.index()).collect();
+    output_as_dot_filtered(out, g, &all_elements)
+}
+
 /*******************************************************************************
  * Matching of graphs against each other.
  * TODO return iterator over possible matches
  */
 
 fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, graph::Index>> {
-    // TODO wrap in struct
-    // methods:
-    // check_or_add(pattern_id, target_id) -> bool
-    let mut mapping = HashMap::new();
-    let mut matched_indexes_to_inspect = HashSet::new();
+    // Used to build a mapping iteratively
+    struct MappingBuilder {
+        mapping: HashMap<graph::Index, graph::Index>,
+        matched_pattern_objects_to_inspect: HashSet<graph::Index>,
+    }
+    impl MappingBuilder {
+        fn new() -> Self {
+            MappingBuilder {
+                mapping: HashMap::new(),
+                matched_pattern_objects_to_inspect: HashSet::new(),
+            }
+        }
+
+        // Returns true if ok, false if conflicts with current matching
+        fn add(&mut self, pattern_object: graph::Index, target_object: graph::Index) -> bool {
+            if let Some(&current_matched_target_object) = self.mapping.get(&pattern_object) {
+                current_matched_target_object == target_object
+            } else {
+                self.mapping.insert(pattern_object, target_object);
+                self.matched_pattern_objects_to_inspect
+                    .insert(pattern_object);
+                true
+            }
+        }
+
+        // Pick one from matched_pattern_objects_to_inspect set
+        fn next_matched_pattern_object_to_inspect(&mut self) -> Option<graph::Index> {
+            match self.matched_pattern_objects_to_inspect
+                .iter()
+                .cloned()
+                .next()
+            {
+                Some(index) => {
+                    self.matched_pattern_objects_to_inspect.remove(&index);
+                    Some(index)
+                }
+                None => None,
+            }
+        }
+    }
+
+    let mut mapping = MappingBuilder::new();
 
     // Match atoms, which are unambiguous
-    for object_ref in pattern.objects() {
-        if let &graph::Object::Atom(ref a) = object_ref.object() {
-            if let Some(target_index) = target.index_of_atom(a) {
-                matched_indexes_to_inspect.insert(object_ref.index());
-                mapping.insert(object_ref.index(), target_index);
+    for pattern_object_ref in pattern.objects() {
+        if let &graph::Object::Atom(ref a) = pattern_object_ref.object() {
+            if let Some(target_object) = target.index_of_atom(a) {
+                mapping.add(pattern_object_ref.index(), target_object);
             }
         }
     }
 
     // Match the rest
-    let take_one = |set: &mut HashSet<_>| set.drain().next();
-    while let Some(matched_index) = take_one(&mut matched_indexes_to_inspect) {
-        eprintln!("TAKE {:?}", &matched_index);
+    while let Some(matched_pattern_object) = mapping.next_matched_pattern_object_to_inspect() {
         // Match neighboring stuff that is unambiguous (and not matched)
         // Add them to list of matched stuff
-        let pattern_object_ref = pattern.object(matched_index).unwrap();
-        let matched_object_ref = target.object(mapping[&matched_index]).unwrap();
+        let matched_pattern_object_ref = pattern.object(matched_pattern_object);
+        let matched_target_object_ref = target.object(mapping.mapping[&matched_pattern_object]);
 
-        // Match in_links if unique between pair of matched elements
-        if pattern_object_ref.in_links().len() == 1 && matched_object_ref.in_links().len() == 1 {
-            let pattern_in_link = pattern_object_ref.in_links()[0];
-            let matched_in_link = matched_object_ref.in_links()[0];
-            if !mapping.contains_key(&pattern_in_link) {
-                mapping.insert(pattern_in_link, matched_in_link);
-                matched_indexes_to_inspect.insert(pattern_in_link);
+        // Match in_links/out_links if unique between pair of matched elements
+        if matched_pattern_object_ref.in_links().len() == 1
+            && matched_target_object_ref.in_links().len() == 1
+        {
+            if !mapping.add(
+                matched_pattern_object_ref.in_links()[0],
+                matched_target_object_ref.in_links()[0],
+            ) {
+                return None;
             }
         }
-        // Match out_links if unique between pair of matched elements
-        if pattern_object_ref.out_links().len() == 1 && matched_object_ref.out_links().len() == 1 {
-            let pattern_out_link = pattern_object_ref.out_links()[0];
-            let matched_out_link = matched_object_ref.out_links()[0];
-            if !mapping.contains_key(&pattern_out_link) {
-                mapping.insert(pattern_out_link, matched_out_link);
-                matched_indexes_to_inspect.insert(pattern_out_link);
+        if matched_pattern_object_ref.out_links().len() == 1
+            && matched_target_object_ref.out_links().len() == 1
+        {
+            if !mapping.add(
+                matched_pattern_object_ref.out_links()[0],
+                matched_target_object_ref.out_links()[0],
+            ) {
+                return None;
             }
         }
 
         // Match ends if matched object is link
-        if let &graph::Object::Link(ref pattern_link) = pattern_object_ref.object() {
-            if let &graph::Object::Link(ref matched_link) = matched_object_ref.object() {
-                // From
-            } else {
-                return None; // Must be a link
+        if let &graph::Object::Link(ref pattern_link) = matched_pattern_object_ref.object() {
+            let target_link = matched_target_object_ref.object().as_link();
+
+            // Match from/to objects
+            if !mapping.add(pattern_link.from, target_link.from) {
+                return None;
+            }
+            if !mapping.add(pattern_link.to, target_link.to) {
+                return None;
             }
         }
+
+        // TODO Match in/out links if their other end is matched too
     }
 
-    Some(mapping)
+    Some(mapping.mapping)
 }
 
 /*******************************************************************************
@@ -550,9 +623,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
 mod wiki {
     extern crate rouille;
 
-    pub type Graph = super::Graph;
-
-    pub fn run(graph: Graph) -> ! {
+    pub fn run(graph: super::Graph) -> ! {
         rouille::start_server("localhost:8000", move |request| {
             // TODO grow from this skeleton
             // html is the entire page content
@@ -612,19 +683,34 @@ fn set_test_data(g: &mut Graph) {
     g.insert_link(date, fight_date);
 }
 
+use std::env;
+
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
     let mut graph = Graph::new();
     set_test_data(&mut graph);
-    {
-        let stdout = io::stdout();
-        output_as_dot(&mut stdout.lock(), &graph).unwrap();
+
+    if args.iter().any(|s| s == "graph") {
+        output_as_dot(&mut io::stdout(), &graph).unwrap()
     }
-    {
+
+    if args.iter().any(|s| s == "pattern") {
         let mut pattern = Graph::new();
         let name_prop = create_name_prop(&mut pattern);
 
         let mapping = match_graph(&pattern, &graph);
         eprintln!("MAPPING {:?}", &mapping);
     }
-    wiki::run(graph)
+
+    if args.iter().any(|s| s == "self") {
+        // Print the matched part of graph
+        let self_mapping = match_graph(&graph, &graph).expect("match failure");
+        let matched_elements: HashSet<graph::Index> = self_mapping.keys().cloned().collect();
+        output_as_dot_filtered(&mut io::stdout(), &graph, &matched_elements).unwrap();
+    }
+
+    if args.iter().any(|s| s == "wiki") {
+        wiki::run(graph)
+    }
 }
