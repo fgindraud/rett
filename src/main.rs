@@ -546,6 +546,27 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
 }
 
 /*******************************************************************************
+ */
+mod wiki {
+    extern crate rouille;
+
+    pub type Graph = super::Graph;
+
+    pub fn run(graph: Graph) -> ! {
+        rouille::start_server("localhost:8000", move |request| {
+            // TODO grow from this skeleton
+            // html is the entire page content
+            // /: link to all named elements ?
+            // /<int>: element with id
+            // /zzz: zzz and its associated stuff
+            // Later: support modification with post. Save graph at each modif (server never
+            // returns)
+            rouille::Response::html("<p>Blah !</p>")
+        })
+    }
+}
+
+/*******************************************************************************
  * Test
  */
 fn create_name_prop(g: &mut Graph) -> graph::Index {
@@ -605,4 +626,5 @@ fn main() {
         let mapping = match_graph(&pattern, &graph);
         eprintln!("MAPPING {:?}", &mapping);
     }
+    wiki::run(graph)
 }

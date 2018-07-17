@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["François Gindraud <francois.gindraud@gmail.com>"]
 
 [dependencies]
+rouille = "2"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
