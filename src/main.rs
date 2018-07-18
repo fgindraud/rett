@@ -1,7 +1,9 @@
+#[macro_use]
+extern crate rouille;
+
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_json;
 // TODO impl serde support for graph (direct)
 
 ///*****************************************************************************
@@ -10,7 +12,7 @@ mod graph {
     use std::collections::HashMap;
 
     /// Atom: represents a basic piece of data (integer, string, etc)
-    #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+    #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
     pub enum Atom {
         String(String),
         Integer(i32),
@@ -25,7 +27,7 @@ mod graph {
     pub type Index = usize;
 
     /// A directed link (edge of the graph)
-    #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+    #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
     pub struct Link {
         pub from: Index,
         pub to: Index,
@@ -34,7 +36,7 @@ mod graph {
     /// Object of the graph: Link, Entity, or Atom.
     /// Entity is an abstract graph entity (node of the graph).
     /// It is defined only by its relationships: not comparable.
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub enum Object {
         Atom(Atom),
         Link(Link),
@@ -211,6 +213,40 @@ mod graph {
                 }
             }
         }
+    }
+}
+
+/*******************************************************************************
+ */
+mod wiki {
+
+    use super::graph::Graph;
+    use super::rouille;
+    use rouille::Response;
+    use std::sync::RwLock;
+
+    pub fn run(graph: Graph) -> ! {
+        let graph = RwLock::new(graph);
+
+        rouille::start_server("localhost:8000", move |request| {
+            // TODO grow from this skeleton
+            // html is the entire page content
+            // /: link to all named elements ?
+            // /zzz: zzz and its associated stuff
+            // Horrorshow templating lib ?
+            router!(request,
+                (GET) (/id/{id: usize}) => {
+                    let graph = graph.read().unwrap();
+                    match graph.get_object(id) {
+                        Some (object_ref) => {
+                            Response::text (format!("Object {}: {:?}", object_ref.index(), object_ref.object()))
+                        },
+                        None => Response::empty_404()
+                    }
+                },
+                _ => Response::empty_404()
+            )
+        })
     }
 }
 
@@ -467,27 +503,6 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
     }
 
     Some(mapping.mapping)
-}
-
-/*******************************************************************************
- */
-mod wiki {
-    extern crate rouille;
-
-    use super::Graph;
-
-    pub fn run(graph: Graph) -> ! {
-        rouille::start_server("localhost:8000", move |request| {
-            // TODO grow from this skeleton
-            // html is the entire page content
-            // /: link to all named elements ?
-            // /<int>: element with id
-            // /zzz: zzz and its associated stuff
-            // Later: support modification with post. Save graph at each modif (server never
-            // returns)
-            rouille::Response::html("<p>Blah !</p>")
-        })
-    }
 }
 
 /*******************************************************************************
