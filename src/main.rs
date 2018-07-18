@@ -5,154 +5,24 @@ extern crate serde_json;
 // TODO impl serde support for graph (direct)
 
 ///*****************************************************************************
-/// A sparse vector, where objects are accessed by indexes.
-mod slot_vec {
-    use std::mem;
-    use std::ops;
-
-    enum Slot<T> {
-        Used(T),
-        Unused(Option<usize>), // Element of a free list of unused Slots
-    }
-    pub struct SlotVec<T> {
-        slots: Vec<Slot<T>>,
-        next_unused_slot_id: Option<usize>, // Free list head
-        nb_objects: usize,
-    }
-
-    impl<T> SlotVec<T> {
-        /// Create an empty SlotVec.
-        pub fn new() -> Self {
-            SlotVec {
-                slots: Vec::new(),
-                next_unused_slot_id: None,
-                nb_objects: 0,
-            }
-        }
-
-        /// Number of stored objects.
-        pub fn len(&self) -> usize {
-            self.nb_objects
-        }
-        /// Number of slots (and maximum index).
-        pub fn nb_slots(&self) -> usize {
-            self.slots.len()
-        }
-
-        /// access a slot (returns none if empty slot).
-        pub fn get(&self, index: usize) -> Option<&T> {
-            match self.slots[index] {
-                Slot::Used(ref value) => Some(value),
-                _ => None,
-            }
-        }
-        /// access a slot (returns none if empty slot): mut version.
-        pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-            match self.slots[index] {
-                Slot::Used(ref mut value) => Some(value),
-                _ => None,
-            }
-        }
-
-        /// Insert an object in any slot, returns the new object index.
-        pub fn insert(&mut self, value: T) -> usize {
-            let new_id = {
-                if let Some(unused_id) = self.next_unused_slot_id {
-                    // Pop unused slot from free list
-                    let unused_slot = &mut self.slots[unused_id];
-                    if let Slot::Unused(next_unused_slot_id) = *unused_slot {
-                        self.next_unused_slot_id = next_unused_slot_id;
-                        *unused_slot = Slot::Used(value);
-                        unused_id
-                    } else {
-                        panic!("Used Slot in free list");
-                    }
-                } else {
-                    // Allocate new slot
-                    let end_of_vec_id = self.nb_slots();
-                    self.slots.push(Slot::Used(value));
-                    end_of_vec_id
-                }
-            };
-            self.nb_objects += 1;
-            new_id
-        }
-        /// Remove the object at the given index. Return the object that was removed.
-        pub fn remove(&mut self, index: usize) -> Option<T> {
-            let slot = &mut self.slots[index];
-            if let Slot::Used(_) = *slot {
-                let old_next_unused_slot_id =
-                    mem::replace(&mut self.next_unused_slot_id, Some(index));
-                let old_value = match mem::replace(slot, Slot::Unused(old_next_unused_slot_id)) {
-                    Slot::Used(value) => value,
-                    _ => panic!("Slot was used"),
-                };
-                self.nb_objects -= 1;
-                Some(old_value)
-            } else {
-                None
-            }
-        }
-    }
-
-    /// Indexation with []: panics on invalid index.
-    impl<T> ops::Index<usize> for SlotVec<T> {
-        type Output = T;
-        fn index(&self, index: usize) -> &T {
-            self.get(index).expect("invalid index")
-        }
-    }
-    impl<T> ops::IndexMut<usize> for SlotVec<T> {
-        fn index_mut(&mut self, index: usize) -> &mut T {
-            self.get_mut(index).expect("invalid index")
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        #[test]
-        fn basic_api() {
-            let mut sv = super::SlotVec::new();
-            assert_eq!(sv.len(), 0);
-            assert_eq!(sv.nb_slots(), 0);
-
-            let id_42 = sv.insert(42);
-            assert_eq!(sv.get(id_42), Some(&42));
-            assert_eq!(sv[id_42], 42);
-            assert_eq!(sv.len(), 1);
-            assert_eq!(sv.nb_slots(), 1);
-
-            let id_12 = sv.insert(12);
-            assert_ne!(id_42, id_12);
-            assert_eq!(sv.len(), 2);
-            assert_eq!(sv.nb_slots(), 2);
-
-            assert_eq!(sv.remove(id_42), Some(42));
-            assert_eq!(sv.len(), 1);
-            assert_eq!(sv.get(id_42), None);
-            assert_eq!(sv.nb_slots(), 2);
-
-            // Check reuse
-            let id_34 = sv.insert(34);
-            assert_eq!(id_34, id_42);
-            assert_ne!(id_42, id_12);
-            assert_eq!(sv.nb_slots(), 2);
-
-            sv[id_34] = 0;
-        }
-    }
-}
-
-///*****************************************************************************
 /// Define a knowledge graph
 mod graph {
-    use slot_vec::SlotVec;
     use std::collections::HashMap;
-    use std::hash::Hash;
 
-    /// Opaque Index type for graph elements
-    #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
-    pub struct Index(usize);
+    /// Atom: represents a basic piece of data (integer, string, etc)
+    #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+    pub enum Atom {
+        String(String),
+        Integer(i32),
+    }
+    impl Atom {
+        pub fn text<T: Into<String>>(text: T) -> Self {
+            Atom::String(text.into())
+        }
+    }
+
+    /// Index for graph elements
+    pub type Index = usize;
 
     /// A directed link (edge of the graph)
     #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
@@ -161,54 +31,44 @@ mod graph {
         pub to: Index,
     }
 
-    /// An abstract graph entity (node of the graph).
-    /// Defined only by its relationships: not comparable.
-    #[derive(Clone, Serialize, Deserialize, Debug)]
-    pub struct Entity;
-
-    /// Object of the graph: Link, Entity, or Atom (parametrized).
-    #[derive(Clone, Serialize, Deserialize)]
-    pub enum Object<A> {
-        Atom(A),
+    /// Object of the graph: Link, Entity, or Atom.
+    /// Entity is an abstract graph entity (node of the graph).
+    /// It is defined only by its relationships: not comparable.
+    #[derive(Serialize, Deserialize)]
+    pub enum Object {
+        Atom(Atom),
         Link(Link),
-        Entity(Entity),
+        Entity,
     }
 
     /// Data for each object.
     /// in_links/out_links: indexes of links pointing to/from this link.
-    struct ObjectData<A> {
-        object: Object<A>,
+    struct ObjectData {
+        object: Object,
         in_links: Vec<Index>,
         out_links: Vec<Index>,
     }
 
     /// Store a graph.
-    pub struct Graph<A> {
-        objects: SlotVec<ObjectData<A>>,
-        atom_indexes: HashMap<A, Index>,
+    pub struct Graph {
+        objects: Vec<Option<ObjectData>>,
+        atom_indexes: HashMap<Atom, Index>,
         link_indexes: HashMap<Link, Index>,
     }
 
     /// Reference an object and its data.
-    pub struct ObjectRef<'a, A: 'a> {
+    pub struct ObjectRef<'a> {
         index: Index,
-        object_data: &'a ObjectData<A>,
+        object_data: &'a ObjectData,
     }
 
     /// Iterate on objects in order of increasing indexes.
-    pub struct OrderedObjectIterator<'a, A: 'a> {
+    pub struct OrderedObjectIterator<'a> {
         next_index: usize,
-        graph: &'a Graph<A>,
+        graph: &'a Graph,
     }
 
-    impl Index {
-        /// Access (read only) the underlying value.
-        pub fn to_usize(&self) -> usize {
-            self.0
-        }
-    }
-
-    impl<A> Object<A> {
+    impl Object {
         pub fn is_link(&self) -> bool {
             match self {
                 &Object::Link(_) => true,
@@ -223,8 +83,8 @@ mod graph {
         }
     }
 
-    impl<A> ObjectData<A> {
-        fn new(object: Object<A>) -> Self {
+    impl ObjectData {
+        fn new(object: Object) -> Self {
             ObjectData {
                 object: object,
                 in_links: Vec::new(),
@@ -233,32 +93,30 @@ mod graph {
         }
     }
 
-    impl<A: Eq + Hash + Clone> Graph<A> {
+    impl Graph {
         /// Create a new empty graph.
         pub fn new() -> Self {
             Graph {
-                objects: SlotVec::new(),
+                objects: Vec::new(),
                 atom_indexes: HashMap::new(),
                 link_indexes: HashMap::new(),
             }
         }
 
         /// Get object, index may be unattributed
-        pub fn get_object<'a>(&'a self, index: Index) -> Option<ObjectRef<'a, A>> {
-            self.objects
-                .get(index.to_usize())
-                .map(|object_data| ObjectRef {
-                    index: index,
-                    object_data: object_data,
-                })
+        pub fn get_object<'a>(&'a self, index: Index) -> Option<ObjectRef<'a>> {
+            self.objects[index].as_ref().map(|object_data| ObjectRef {
+                index: index,
+                object_data: object_data,
+            })
         }
         /// Get object, assume valid index
-        pub fn object<'a>(&'a self, index: Index) -> ObjectRef<'a, A> {
+        pub fn object<'a>(&'a self, index: Index) -> ObjectRef<'a> {
             self.get_object(index).expect("invalid index")
         }
 
         /// Iterate on valid objects
-        pub fn objects<'a>(&'a self) -> OrderedObjectIterator<'a, A> {
+        pub fn objects<'a>(&'a self) -> OrderedObjectIterator<'a> {
             OrderedObjectIterator {
                 next_index: 0,
                 graph: self,
@@ -266,7 +124,7 @@ mod graph {
         }
 
         /// Get index of an atom, or None if not found.
-        pub fn index_of_atom(&self, atom: &A) -> Option<Index> {
+        pub fn index_of_atom(&self, atom: &Atom) -> Option<Index> {
             self.atom_indexes.get(&atom).cloned()
         }
         /// Get index of a link, or None if not found.
@@ -274,16 +132,30 @@ mod graph {
             self.link_indexes.get(&link).cloned()
         }
 
+        fn insert_object(&mut self, object: Object) -> Index {
+            // Find unused index
+            for index in 0..self.objects.len() {
+                if self.objects[index].is_none() {
+                    self.objects[index] = Some(ObjectData::new(object));
+                    return index;
+                }
+            }
+            // Or allocate new one
+            let index = self.objects.len();
+            self.objects.push(Some(ObjectData::new(object)));
+            index
+        }
+        fn object_mut(&mut self, index: Index) -> &mut ObjectData {
+            self.objects[index].as_mut().expect("Invalid index")
+        }
+
         /// Insert a new atom, return its index.
         /// If already present, only return the current index for the atom.
-        pub fn insert_atom(&mut self, atom: A) -> Index {
+        pub fn insert_atom(&mut self, atom: Atom) -> Index {
             match self.index_of_atom(&atom) {
                 Some(index) => index,
                 None => {
-                    let new_index = Index(
-                        self.objects
-                            .insert(ObjectData::new(Object::Atom(atom.clone()))),
-                    );
+                    let new_index = self.insert_object(Object::Atom(atom.clone()));
                     self.atom_indexes.insert(atom, new_index);
                     new_index
                 }
@@ -296,28 +168,25 @@ mod graph {
             match self.index_of_link(&link) {
                 Some(index) => index,
                 None => {
-                    let new_index = Index(
-                        self.objects
-                            .insert(ObjectData::new(Object::Link(link.clone()))),
-                    );
-                    self.objects[link.from.to_usize()].out_links.push(new_index);
-                    self.objects[link.to.to_usize()].in_links.push(new_index);
+                    let new_index = self.insert_object(Object::Link(link.clone()));
+                    self.object_mut(link.from).out_links.push(new_index);
+                    self.object_mut(link.to).in_links.push(new_index);
                     self.link_indexes.insert(link, new_index);
                     new_index
                 }
             }
         }
-        /// Insert a new entity. Return its index.
-        pub fn insert_entity(&mut self) -> Index {
-            Index(self.objects.insert(ObjectData::new(Object::Entity(Entity))))
+        /// Create a new entity. Return its index.
+        pub fn create_entity(&mut self) -> Index {
+            self.insert_object(Object::Entity)
         }
     }
 
-    impl<'a, A> ObjectRef<'a, A> {
+    impl<'a> ObjectRef<'a> {
         pub fn index(&self) -> Index {
             self.index
         }
-        pub fn object(&self) -> &'a Object<A> {
+        pub fn object(&self) -> &'a Object {
             &self.object_data.object
         }
         pub fn in_links(&self) -> &'a Vec<Index> {
@@ -328,16 +197,16 @@ mod graph {
         }
     }
 
-    impl<'a, A: Eq + Hash + Clone> Iterator for OrderedObjectIterator<'a, A> {
-        type Item = ObjectRef<'a, A>;
+    impl<'a> Iterator for OrderedObjectIterator<'a> {
+        type Item = ObjectRef<'a>;
         fn next(&mut self) -> Option<Self::Item> {
             loop {
                 let current_index = self.next_index;
-                if current_index >= self.graph.objects.nb_slots() {
+                if current_index >= self.graph.objects.len() {
                     return None;
                 };
                 self.next_index = current_index + 1;
-                if let Some(object_ref) = self.graph.get_object(Index(current_index)) {
+                if let Some(object_ref) = self.graph.get_object(current_index) {
                     return Some(object_ref);
                 }
             }
@@ -346,19 +215,7 @@ mod graph {
 }
 
 ///*****************************************************************************
-/// Atom: represents a basic piece of data (integer, string, etc)
-#[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-pub enum Atom {
-    String(String),
-    Integer(i32),
-}
-impl<'a> From<&'a str> for Atom {
-    fn from(text: &'a str) -> Self {
-        Atom::String(String::from(text))
-    }
-}
-
-type Graph = graph::Graph<Atom>;
+use graph::{Atom, Graph};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -397,12 +254,6 @@ fn output_as_dot_filtered(
         "#AA4499",
     ];
 
-    // Pretty print for some types
-    impl fmt::Display for graph::Index {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            self.to_usize().fmt(f)
-        }
-    }
     impl fmt::Display for Atom {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
@@ -498,7 +349,7 @@ fn output_as_dot_filtered(
                     writeln!(out, "\t{0} -> {1} [color=\"{2}\"];", index, link.to, color)?;
                 }
             }
-            &graph::Object::Entity(_) => {
+            &graph::Object::Entity => {
                 writeln!(out, "\t{0} [shape=hexagon,label=\"{0}\"];", index)?;
             }
         }
@@ -623,7 +474,9 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
 mod wiki {
     extern crate rouille;
 
-    pub fn run(graph: super::Graph) -> ! {
+    use super::Graph;
+
+    pub fn run(graph: Graph) -> ! {
         rouille::start_server("localhost:8000", move |request| {
             // TODO grow from this skeleton
             // html is the entire page content
@@ -641,16 +494,16 @@ mod wiki {
  * Test
  */
 fn create_name_prop(g: &mut Graph) -> graph::Index {
-    let name_entity = g.insert_entity();
-    let name_text = g.insert_atom(Atom::from("name"));
+    let name_entity = g.create_entity();
+    let name_text = g.insert_atom(Atom::text("name"));
     let name_entity_description = g.insert_link(name_text, name_entity);
     let _name_entity_description_description = g.insert_link(name_entity, name_entity_description);
     name_entity
 }
 
 fn create_named_entity(g: &mut Graph, name_entity: graph::Index, text: &str) -> graph::Index {
-    let entity = g.insert_entity();
-    let atom = g.insert_atom(Atom::from(text));
+    let entity = g.create_entity();
+    let atom = g.insert_atom(Atom::text(text));
     let link = g.insert_link(atom, entity);
     let _link_description = g.insert_link(name_entity, link);
     entity
