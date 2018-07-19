@@ -76,8 +76,8 @@ mod wiki {
                 (GET) (/id/{id: usize}) => {
                     let graph = graph.read().unwrap();
                     match graph.get_object(id) {
-                        Some (object_ref) => {
-                            Response::text (format!("Object {}: {:?}", object_ref.index(), object_ref.object()))
+                        Some (object) => {
+                            Response::text (format!("Object {}: {:?}", object.index(), *object))
                         },
                         None => Response::empty_404()
                     }
@@ -127,9 +127,9 @@ fn output_as_dot_filtered(
 
     impl fmt::Display for Atom {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            match self {
-                &Atom::String(ref s) => write!(f, "\\\"{}\\\"", s),
-                &Atom::Integer(i) => i.fmt(f),
+            match *self {
+                Atom::String(ref s) => write!(f, "\\\"{}\\\"", s),
+                Atom::Integer(i) => i.fmt(f),
             }
         }
     }
@@ -138,10 +138,10 @@ fn output_as_dot_filtered(
         // Table to store color assignements for previously colored Links.
         let mut link_color_indexes: HashMap<Index, usize> = HashMap::new();
 
-        for object_ref in g.objects() {
+        for object in g.objects() {
             // Select a color index for a link, assuming all lesser indexed Links have been colored.
-            if let &Object::Link(ref link) = object_ref.object() {
-                let index = object_ref.index();
+            if let Object::Link(ref link) = *object {
+                let index = object.index();
                 // Build a list of colors of all links we are in conflict with
                 let conflicting_color_indexes = {
                     let mut conflicting_color_indexes = Vec::new();
@@ -152,18 +152,18 @@ fn output_as_dot_filtered(
                             }
                         };
                         // Conflicts with links we are pointing to/from
-                        if g.object(link.from).object().is_link() {
+                        if g.object(link.from).is_link() {
                             conflict_with_color_of_link(&link.from)
                         };
-                        if g.object(link.to).object().is_link() {
+                        if g.object(link.to).is_link() {
                             conflict_with_color_of_link(&link.to)
                         };
                         // Conflicts with links that are pointing to/from us
-                        object_ref
+                        object
                             .in_links()
                             .iter()
                             .for_each(&mut conflict_with_color_of_link);
-                        object_ref
+                        object
                             .out_links()
                             .iter()
                             .for_each(&mut conflict_with_color_of_link);
@@ -191,17 +191,15 @@ fn output_as_dot_filtered(
 
     // Output graph
     writeln!(out, "digraph {{")?;
-    for object_ref in g.objects()
-        .filter(|object_ref| (*predicate)(object_ref.index()))
-    {
-        let index = object_ref.index();
-        match object_ref.object() {
-            &Object::Atom(ref a) => {
+    for object in g.objects().filter(|object| (*predicate)(object.index())) {
+        let index = object.index();
+        match *object {
+            Object::Atom(ref a) => {
                 writeln!(out, "\t{0} [shape=box,label=\"{0}: {1}\"];", index, a)?;
             }
-            &Object::Link(ref link) => {
+            Object::Link(ref link) => {
                 let color = color_palette[link_color_indexes[&index]];
-                if object_ref.in_links().is_empty() && object_ref.out_links().is_empty() {
+                if object.in_links().is_empty() && object.out_links().is_empty() {
                     writeln!(
                         out,
                         "\t{0} -> {1} [fontcolor=grey,color=\"{3}\",label=\"{2}\"];",
@@ -252,8 +250,8 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>>
 
         // Returns true if ok, false if conflicts with current matching
         fn add(&mut self, pattern_object: Index, target_object: Index) -> bool {
-            if let Some(&current_matched_target_object) = self.mapping.get(&pattern_object) {
-                current_matched_target_object == target_object
+            if let Some(&matched_target_object) = self.mapping.get(&pattern_object) {
+                matched_target_object == target_object
             } else {
                 self.mapping.insert(pattern_object, target_object);
                 self.matched_pattern_objects_to_inspect
@@ -281,46 +279,46 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>>
     let mut mapping = MappingBuilder::new();
 
     // Match atoms, which are unambiguous
-    for pattern_object_ref in pattern.objects() {
-        if let &Object::Atom(ref a) = pattern_object_ref.object() {
-            if let Some(target_object) = target.get_atom(a) {
-                mapping.add(pattern_object_ref.index(), target_object);
+    for pattern_object in pattern.objects() {
+        if let Object::Atom(ref a) = *pattern_object {
+            if let Some(target_object_id) = target.get_atom(a) {
+                mapping.add(pattern_object.index(), target_object_id);
             }
         }
     }
 
     // Match the rest
-    while let Some(matched_pattern_object) = mapping.next_matched_pattern_object_to_inspect() {
+    while let Some(matched_pattern_object_id) = mapping.next_matched_pattern_object_to_inspect() {
         // Match neighboring stuff that is unambiguous (and not matched)
         // Add them to list of matched stuff
-        let matched_pattern_object_ref = pattern.object(matched_pattern_object);
-        let matched_target_object_ref = target.object(mapping.mapping[&matched_pattern_object]);
+        let matched_pattern_object = pattern.object(matched_pattern_object_id);
+        let matched_target_object = target.object(mapping.mapping[&matched_pattern_object_id]);
 
         // Match in_links/out_links if unique between pair of matched elements
-        if matched_pattern_object_ref.in_links().len() == 1
-            && matched_target_object_ref.in_links().len() == 1
+        if matched_pattern_object.in_links().len() == 1
+            && matched_target_object.in_links().len() == 1
         {
             if !mapping.add(
-                matched_pattern_object_ref.in_links()[0],
-                matched_target_object_ref.in_links()[0],
+                matched_pattern_object.in_links()[0],
+                matched_target_object.in_links()[0],
             ) {
                 return None;
             }
         }
-        if matched_pattern_object_ref.out_links().len() == 1
-            && matched_target_object_ref.out_links().len() == 1
+        if matched_pattern_object.out_links().len() == 1
+            && matched_target_object.out_links().len() == 1
         {
             if !mapping.add(
-                matched_pattern_object_ref.out_links()[0],
-                matched_target_object_ref.out_links()[0],
+                matched_pattern_object.out_links()[0],
+                matched_target_object.out_links()[0],
             ) {
                 return None;
             }
         }
 
         // Match ends if matched object is link
-        if let &Object::Link(ref pattern_link) = matched_pattern_object_ref.object() {
-            let target_link = matched_target_object_ref.object().as_link();
+        if let Object::Link(ref pattern_link) = *matched_pattern_object {
+            let target_link = matched_target_object.as_link();
 
             // Match from/to objects
             if !mapping.add(pattern_link.from, target_link.from) {
@@ -339,6 +337,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>>
 
 /*******************************************************************************
  * Test
+ * TODO update with wiki conventions when defined
  */
 fn create_name_prop(g: &mut Graph) -> Index {
     let name_entity = g.create_abstract();
@@ -436,6 +435,8 @@ fn main() {
             ),
         )
         .get_matches();
+
+    // TODO useful tooling: merge of files
 
     let db_filepath = Path::new(matches.value_of_os("db_file").unwrap());
 

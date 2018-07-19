@@ -1,8 +1,9 @@
 use super::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
+use std::convert::AsRef;
+use std::ops::Deref;
 
 // TODO remove / update elements semantics
-// TODO better object access ?
 // TODO pattern matching as needed for the wiki output
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
@@ -61,12 +62,24 @@ pub enum Object {
     Abstract,
 }
 
-/// Data for each object.
-/// in_links/out_links: indexes of links pointing to/from this link.
+/** Data for each graph object.
+ * In addition to the object, store local topology for fast traversal.
+ * in_links/out_links: indexes of links pointing to/from this link.
+ * TODO Vec<String> notes that are not part of topology ?
+ */
 struct ObjectData {
     object: Object,
     in_links: Vec<Index>,
     out_links: Vec<Index>,
+}
+impl ObjectData {
+    fn new(object: Object) -> Self {
+        ObjectData {
+            object: object,
+            in_links: Vec::new(),
+            out_links: Vec::new(),
+        }
+    }
 }
 
 pub struct Graph {
@@ -75,7 +88,7 @@ pub struct Graph {
     link_indexes: HashMap<Link, Index>,
 }
 
-/// Reference an object and its data.
+/// Reference an object and its data. Has AsRef and Deref to behave like an Object.
 pub struct ObjectRef<'a> {
     index: Index,
     object_data: &'a ObjectData,
@@ -87,36 +100,12 @@ pub struct OrderedObjectIterator<'a> {
     graph: &'a Graph,
 }
 
-impl Object {
-    pub fn is_link(&self) -> bool {
-        match self {
-            &Object::Link(_) => true,
-            _ => false,
-        }
-    }
-    pub fn as_link(&self) -> &Link {
-        match self {
-            &Object::Link(ref l) => l,
-            _ => panic!("not a link"),
-        }
-    }
-}
-
-impl ObjectData {
-    fn new(object: Object) -> Self {
-        ObjectData {
-            object: object,
-            in_links: Vec::new(),
-            out_links: Vec::new(),
-        }
-    }
-}
-
 impl Graph {
     /// Create a new empty graph.
     pub fn new() -> Self {
         Graph {
             objects: Vec::new(),
+            // TODO replace with something supporting partial/fuzzy searches
             atom_indexes: HashMap::new(),
             link_indexes: HashMap::new(),
         }
@@ -214,14 +203,38 @@ impl<'a> ObjectRef<'a> {
     pub fn index(&self) -> Index {
         self.index
     }
-    pub fn object(&self) -> &'a Object {
-        &self.object_data.object
-    }
     pub fn in_links(&self) -> &'a Vec<Index> {
         &self.object_data.in_links
     }
     pub fn out_links(&self) -> &'a Vec<Index> {
         &self.object_data.out_links
+    }
+}
+impl<'a> AsRef<Object> for ObjectRef<'a> {
+    fn as_ref(&self) -> &Object {
+        &self.object_data.object
+    }
+}
+impl<'a> Deref for ObjectRef<'a> {
+    type Target = Object;
+    fn deref(&self) -> &Object {
+        &self.object_data.object
+    }
+}
+
+impl Object {
+    // FIXME not very structured like. keep or improve depending on use cases
+    pub fn is_link(&self) -> bool {
+        match *self {
+            Object::Link(_) => true,
+            _ => false,
+        }
+    }
+    pub fn as_link(&self) -> &Link {
+        match *self {
+            Object::Link(ref l) => l,
+            _ => panic!("not a link"),
+        }
     }
 }
 
