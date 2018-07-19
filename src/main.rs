@@ -7,6 +7,8 @@ extern crate serde_json;
 // Wiki
 #[macro_use]
 extern crate rouille;
+#[macro_use]
+extern crate horrorshow;
 
 #[macro_use]
 extern crate clap;
@@ -14,6 +16,9 @@ extern crate clap;
 /// Knowledge graph definition.
 mod graph;
 use graph::{Atom, Graph, Index, Link, Object};
+
+/// Wiki interface
+mod wiki;
 
 use std::fs::File;
 use std::path::Path;
@@ -52,39 +57,6 @@ fn write_graph_to_file(filename: &Path, graph: &Graph) {
             filename.display(),
             e
         ),
-    }
-}
-
-/*******************************************************************************
- */
-mod wiki {
-    use super::{read_graph_from_file, rouille, Path};
-    use rouille::Response;
-
-    pub fn run(addr: &str, db_file: &Path) -> ! {
-        use std::sync::RwLock;
-        let graph = read_graph_from_file(db_file);
-        let graph = RwLock::new(graph);
-        eprintln!("Wiki starting on {}", addr,);
-
-        rouille::start_server(addr, move |request| {
-            // TODO grow from this skeleton
-            // /: link to all named elements ?
-            // /zzz: zzz and its associated stuff
-            // Horrorshow templating lib ?
-            router!(request,
-                (GET) (/id/{id: usize}) => {
-                    let graph = graph.read().unwrap();
-                    match graph.get_object(id) {
-                        Some (object) => {
-                            Response::text (format!("Object {}: {:?}", object.index(), *object))
-                        },
-                        None => Response::empty_404()
-                    }
-                },
-                _ => Response::empty_404()
-            )
-        })
     }
 }
 
