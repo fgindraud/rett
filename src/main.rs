@@ -32,6 +32,16 @@ mod graph {
         pub from: Index,
         pub to: Index,
     }
+    impl Link {
+        pub fn new(from: Index, to: Index) -> Self {
+            Link { from: from, to: to }
+        }
+    }
+    impl From<(Index, Index)> for Link {
+        fn from(pair: (Index, Index)) -> Link {
+            Link::new(pair.0, pair.1)
+        }
+    }
 
     /// Object of the graph: Link, Entity, or Atom.
     /// Entity is an abstract graph entity (node of the graph).
@@ -126,35 +136,17 @@ mod graph {
         }
 
         /// Get index of an atom, or None if not found.
-        pub fn index_of_atom(&self, atom: &Atom) -> Option<Index> {
+        pub fn get_atom(&self, atom: &Atom) -> Option<Index> {
             self.atom_indexes.get(&atom).cloned()
         }
         /// Get index of a link, or None if not found.
-        pub fn index_of_link(&self, link: &Link) -> Option<Index> {
+        pub fn get_link(&self, link: &Link) -> Option<Index> {
             self.link_indexes.get(&link).cloned()
         }
 
-        fn insert_object(&mut self, object: Object) -> Index {
-            // Find unused index
-            for index in 0..self.objects.len() {
-                if self.objects[index].is_none() {
-                    self.objects[index] = Some(ObjectData::new(object));
-                    return index;
-                }
-            }
-            // Or allocate new one
-            let index = self.objects.len();
-            self.objects.push(Some(ObjectData::new(object)));
-            index
-        }
-        fn object_mut(&mut self, index: Index) -> &mut ObjectData {
-            self.objects[index].as_mut().expect("Invalid index")
-        }
-
-        /// Insert a new atom, return its index.
-        /// If already present, only return the current index for the atom.
-        pub fn insert_atom(&mut self, atom: Atom) -> Index {
-            match self.index_of_atom(&atom) {
+        /// Get the index of an atom, inserting it if not found.
+        pub fn use_atom(&mut self, atom: Atom) -> Index {
+            match self.get_atom(&atom) {
                 Some(index) => index,
                 None => {
                     let new_index = self.insert_object(Object::Atom(atom.clone()));
@@ -163,11 +155,9 @@ mod graph {
                 }
             }
         }
-        /// Insert a new link, return its index.
-        /// If already present, only return the current index for the link.
-        pub fn insert_link(&mut self, from: Index, to: Index) -> Index {
-            let link = Link { from: from, to: to }; // TODO improve ?
-            match self.index_of_link(&link) {
+        /// Get the index of an atom, inserting it if not found.
+        pub fn use_link(&mut self, link: Link) -> Index {
+            match self.get_link(&link) {
                 Some(index) => index,
                 None => {
                     let new_index = self.insert_object(Object::Link(link.clone()));
@@ -181,6 +171,24 @@ mod graph {
         /// Create a new entity. Return its index.
         pub fn create_entity(&mut self) -> Index {
             self.insert_object(Object::Entity)
+        }
+
+        fn insert_object(&mut self, object: Object) -> Index {
+            // Find unused index
+            for index in 0..self.objects.len() {
+                let mut cell = &mut self.objects[index];
+                if cell.is_none() {
+                    *cell = Some(ObjectData::new(object));
+                    return index;
+                }
+            }
+            // Or allocate new one
+            let index = self.objects.len();
+            self.objects.push(Some(ObjectData::new(object)));
+            index
+        }
+        fn object_mut(&mut self, index: Index) -> &mut ObjectData {
+            self.objects[index].as_mut().expect("Invalid index")
         }
     }
 
@@ -251,7 +259,7 @@ mod wiki {
 }
 
 ///*****************************************************************************
-use graph::{Atom, Graph};
+use graph::{Atom, Graph, Link};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -451,7 +459,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
     // Match atoms, which are unambiguous
     for pattern_object_ref in pattern.objects() {
         if let &graph::Object::Atom(ref a) = pattern_object_ref.object() {
-            if let Some(target_object) = target.index_of_atom(a) {
+            if let Some(target_object) = target.get_atom(a) {
                 mapping.add(pattern_object_ref.index(), target_object);
             }
         }
@@ -510,17 +518,18 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
  */
 fn create_name_prop(g: &mut Graph) -> graph::Index {
     let name_entity = g.create_entity();
-    let name_text = g.insert_atom(Atom::text("name"));
-    let name_entity_description = g.insert_link(name_text, name_entity);
-    let _name_entity_description_description = g.insert_link(name_entity, name_entity_description);
+    let name_text = g.use_atom(Atom::text("name"));
+    let name_entity_description = g.use_link(Link::new(name_text, name_entity));
+    let _name_entity_description_description =
+        g.use_link(Link::new(name_entity, name_entity_description));
     name_entity
 }
 
 fn create_named_entity(g: &mut Graph, name_entity: graph::Index, text: &str) -> graph::Index {
     let entity = g.create_entity();
-    let atom = g.insert_atom(Atom::text(text));
-    let link = g.insert_link(atom, entity);
-    let _link_description = g.insert_link(name_entity, link);
+    let atom = g.use_atom(Atom::text(text));
+    let link = g.use_link(Link::new(atom, entity));
+    let _link_description = g.use_link(Link::new(name_entity, link));
     entity
 }
 
@@ -531,24 +540,24 @@ fn set_test_data(g: &mut Graph) {
     let bob = create_named_entity(g, name, "bob");
 
     let pj = create_named_entity(g, name, "pj");
-    g.insert_link(pj, joe);
-    g.insert_link(pj, bob);
+    g.use_link(Link::new(pj, joe));
+    g.use_link(Link::new(pj, bob));
 
     let fight = create_named_entity(g, name, "fight");
-    let joe_in_fight = g.insert_link(joe, fight);
-    let bob_in_fight = g.insert_link(bob, fight);
+    let joe_in_fight = g.use_link(Link::new(joe, fight));
+    let bob_in_fight = g.use_link(Link::new(bob, fight));
 
     let was_present = create_named_entity(g, name, "was_present");
-    g.insert_link(was_present, joe_in_fight);
-    g.insert_link(was_present, bob_in_fight);
+    g.use_link(Link::new(was_present, joe_in_fight));
+    g.use_link(Link::new(was_present, bob_in_fight));
 
     let win = create_named_entity(g, name, "win");
-    g.insert_link(win, bob_in_fight);
+    g.use_link(Link::new(win, bob_in_fight));
 
     let date = create_named_entity(g, name, "date");
-    let some_date = g.insert_atom(Atom::Integer(2018));
-    let fight_date = g.insert_link(some_date, fight);
-    g.insert_link(date, fight_date);
+    let some_date = g.use_atom(Atom::Integer(2018));
+    let fight_date = g.use_link(Link::new(some_date, fight));
+    g.use_link(Link::new(date, fight_date));
 }
 
 use std::env;
