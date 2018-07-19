@@ -2,6 +2,7 @@
 name = "rett"
 version = "0.1.0"
 authors = ["François Gindraud <francois.gindraud@gmail.com>"]
+description = "Tool to store, manipulate and display relational informations"
 
 [dependencies]
 rouille = "2"

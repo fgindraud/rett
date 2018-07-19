@@ -2,6 +2,7 @@
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate serde_json;
 
 // Wiki
 #[macro_use]
@@ -349,6 +350,9 @@ fn main() {
     let mut graph = Graph::new();
     set_test_data(&mut graph);
 
+    if args.iter().any(|s| s == "serde") {
+        serde_json::to_writer(io::stdout(), &graph).unwrap()
+    }
     if args.iter().any(|s| s == "graph") {
         output_as_dot(&mut io::stdout(), &graph).unwrap()
     }

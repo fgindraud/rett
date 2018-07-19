@@ -1,6 +1,6 @@
+use super::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 
-// TODO serde IO
 // TODO remove / update elements semantics
 // TODO better object access ?
 // TODO pattern matching as needed for the wiki output
@@ -54,7 +54,7 @@ impl From<(Index, Index)> for Link {
  * Abstract objects are exclusively defined by their links (relations with other objects).
  * They are not comparable, and must be searched by pattern matching of their relation.
  */
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Object {
     Atom(Atom),
     Link(Link),
@@ -160,7 +160,7 @@ impl Graph {
             Some(index) => index,
             None => {
                 let new_index = self.insert_object(Object::Atom(atom.clone()));
-                self.atom_indexes.insert(atom, new_index);
+                self.register_atom(new_index, atom);
                 new_index
             }
         }
@@ -171,9 +171,7 @@ impl Graph {
             Some(index) => index,
             None => {
                 let new_index = self.insert_object(Object::Link(link.clone()));
-                self.object_mut(link.from).out_links.push(new_index);
-                self.object_mut(link.to).in_links.push(new_index);
-                self.link_indexes.insert(link, new_index);
+                self.register_link(new_index, link);
                 new_index
             }
         }
@@ -199,6 +197,16 @@ impl Graph {
     }
     fn object_mut(&mut self, index: Index) -> &mut ObjectData {
         self.objects[index].as_mut().expect("Invalid index")
+    }
+    fn register_atom(&mut self, index: Index, atom: Atom) {
+        let old = self.atom_indexes.insert(atom, index);
+        assert_eq!(old, None);
+    }
+    fn register_link(&mut self, index: Index, link: Link) {
+        self.object_mut(link.from).out_links.push(index);
+        self.object_mut(link.to).in_links.push(index);
+        let old = self.link_indexes.insert(link, index);
+        assert_eq!(old, None);
     }
 }
 
@@ -229,6 +237,100 @@ impl<'a> Iterator for OrderedObjectIterator<'a> {
             if let Some(object_ref) = self.graph.get_object(current_index) {
                 return Some(object_ref);
             }
+        }
+    }
+}
+
+/******************************************************************************
+ * IO using serde.
+ * The graph is serialized as a sequence of Option<Object>.
+ * Atoms, topology and indexes are conserved.
+ */
+impl Serialize for Graph {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(self.objects.len()))?;
+        for cell in &self.objects {
+            seq.serialize_element(&cell.as_ref().map(|obj_data| &obj_data.object))?;
+        }
+        seq.end()
+    }
+}
+
+impl<'d> Deserialize<'d> for Graph {
+    fn deserialize<D: Deserializer<'d>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{SeqAccess, Visitor};
+        use std::fmt;
+
+        // Define a Visitor tag for our case, and pass it to deserializer.
+        struct GraphVisitor;
+        impl<'s> Visitor<'s> for GraphVisitor {
+            type Value = Graph;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("graph::Graph")
+            }
+
+            fn visit_seq<S: SeqAccess<'s>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
+                let mut graph = Graph::new();
+                // Fill graph with raw objects
+                while let Some(cell) = seq.next_element::<Option<Object>>()? {
+                    graph.objects.push(cell.map(|obj| ObjectData::new(obj)))
+                }
+                // Now that all objects are defined, restore ObjectData.
+                for index in 0..graph.objects.len() {
+                    let maybe_object: Option<Object> = graph.objects[index]
+                        .as_ref()
+                        .map(|obj_data| obj_data.object.clone());
+                    match maybe_object {
+                        Some(Object::Atom(atom)) => graph.register_atom(index, atom),
+                        Some(Object::Link(link)) => graph.register_link(index, link),
+                        _ => (),
+                    }
+                }
+                Ok(graph)
+            }
+        }
+        deserializer.deserialize_seq(GraphVisitor)
+    }
+}
+
+/******************************************************************************
+ * Tests.
+ */
+#[cfg(test)]
+mod tests {
+    use super::super::serde_json;
+    use super::*;
+
+    // This equality operator is for test only. Abstract objects are supposed to be non-comparable.
+    impl PartialEq for Object {
+        fn eq(&self, other: &Object) -> bool {
+            match (self, other) {
+                (Object::Atom(ref l), Object::Atom(ref r)) => l == r,
+                (Object::Link(ref l), Object::Link(ref r)) => l == r,
+                (Object::Abstract, Object::Abstract) => true,
+                _ => false,
+            }
+        }
+    }
+
+    #[test]
+    fn io() {
+        // Dummy graph
+        let mut graph = Graph::new();
+        let i0 = graph.create_abstract();
+        let i1 = graph.use_atom(Atom::text("Abstract"));
+        let i2 = graph.use_link(Link::new(i1, i0));
+        let _i3 = graph.use_link(Link::new(i0, i2));
+        // Serialize and deserialize
+        let serialized = serde_json::to_string(&graph).expect("Serialization failure");
+        let deserialized: Graph =
+            serde_json::from_str(&serialized).expect("Deserialization failure");
+        // Compare
+        for object_ref in graph.objects() {
+            let deserialized_object_ref = deserialized.object(object_ref.index());
+            assert_eq!(object_ref.object(), deserialized_object_ref.object());
         }
     }
 }
