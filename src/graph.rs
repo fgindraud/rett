@@ -5,7 +5,6 @@ use std::collections::HashMap;
 // TODO better object access ?
 // TODO pattern matching as needed for the wiki output
 
-/// Atom: represents a basic piece of data (integer, string, etc)
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum Atom {
     String(String),
@@ -17,10 +16,9 @@ impl Atom {
     }
 }
 
-/// Index for graph elements. Graph elements never change of index after creation.
+/// Index for graph elements.
 pub type Index = usize;
 
-/// A directed link (edge of the graph)
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct Link {
     pub from: Index,
@@ -37,14 +35,30 @@ impl From<(Index, Index)> for Link {
     }
 }
 
-/// Object of the graph: Link, Entity, or Atom.
-/// Entity is an abstract graph entity (node of the graph).
-/// It is defined only by its relationships.
+/** Object of the graph:
+ * All objects are identified by their index in the graph (which is constant after creation).
+ * All objects can be pointed to/from by a link.
+ *
+ * Atom: a basic piece of concrete data.
+ * Must be hashmap compatible (comparable).
+ * In a graph, atoms are unique, and can be searched from their value.
+ *
+ * Link: a directed arrow between two graph objects.
+ * Links are also unique and can be searched from their value.
+ * Links can link any two elements of the graph (no restriction).
+ * It is up to the user to give semantics to a link.
+ * A common pattern is to "annotate a link with an atom" with an atom representing a relation type.
+ * It consists of creating another link from the atom to the annotated link.
+ *
+ * Abstract: abstract graph object with no data.
+ * Abstract objects are exclusively defined by their links (relations with other objects).
+ * They are not comparable, and must be searched by pattern matching of their relation.
+ */
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Object {
     Atom(Atom),
     Link(Link),
-    Entity,
+    Abstract,
 }
 
 /// Data for each object.
@@ -164,9 +178,9 @@ impl Graph {
             }
         }
     }
-    /// Create a new entity. Return its index.
-    pub fn create_entity(&mut self) -> Index {
-        self.insert_object(Object::Entity)
+    /// Create a new abstract object, return its index.
+    pub fn create_abstract(&mut self) -> Index {
+        self.insert_object(Object::Abstract)
     }
 
     fn insert_object(&mut self, object: Object) -> Index {

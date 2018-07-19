@@ -10,6 +10,7 @@ extern crate rouille;
 /** Knowledge graph.
  */
 mod graph;
+use graph::{Atom, Graph, Index, Link, Object};
 
 /*******************************************************************************
  */
@@ -44,24 +45,21 @@ mod wiki {
     }
 }
 
-///*****************************************************************************
-use graph::{Atom, Graph, Link};
-
+/*****************************************************************************
+ */
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io;
 
-///*****************************************************************************
 /// Output graph as dot.
 ///
 /// Added basic filtering.
 /// TODO improve it.
 /// Notion of graph view (partial) ?
-
 fn output_as_dot_filtered(
     out: &mut io::Write,
     g: &Graph,
-    elements: &HashSet<graph::Index>,
+    predicate: &Fn(Index) -> bool,
 ) -> io::Result<()> {
     /* Link handling.
      *
@@ -95,17 +93,17 @@ fn output_as_dot_filtered(
 
     let link_color_indexes = {
         // Table to store color assignements for previously colored Links.
-        let mut link_color_indexes: HashMap<graph::Index, usize> = HashMap::new();
+        let mut link_color_indexes: HashMap<Index, usize> = HashMap::new();
 
         for object_ref in g.objects() {
             // Select a color index for a link, assuming all lesser indexed Links have been colored.
-            if let &graph::Object::Link(ref link) = object_ref.object() {
+            if let &Object::Link(ref link) = object_ref.object() {
                 let index = object_ref.index();
                 // Build a list of colors of all links we are in conflict with
                 let conflicting_color_indexes = {
                     let mut conflicting_color_indexes = Vec::new();
                     {
-                        let mut conflict_with_color_of_link = |i: &graph::Index| {
+                        let mut conflict_with_color_of_link = |i: &Index| {
                             if *i < index {
                                 conflicting_color_indexes.push(link_color_indexes[i])
                             }
@@ -151,14 +149,14 @@ fn output_as_dot_filtered(
     // Output graph
     writeln!(out, "digraph {{")?;
     for object_ref in g.objects()
-        .filter(|object_ref| elements.contains(&object_ref.index()))
+        .filter(|object_ref| (*predicate)(object_ref.index()))
     {
         let index = object_ref.index();
         match object_ref.object() {
-            &graph::Object::Atom(ref a) => {
+            &Object::Atom(ref a) => {
                 writeln!(out, "\t{0} [shape=box,label=\"{0}: {1}\"];", index, a)?;
             }
-            &graph::Object::Link(ref link) => {
+            &Object::Link(ref link) => {
                 let color = color_palette[link_color_indexes[&index]];
                 if object_ref.in_links().is_empty() && object_ref.out_links().is_empty() {
                     writeln!(
@@ -179,7 +177,7 @@ fn output_as_dot_filtered(
                     writeln!(out, "\t{0} -> {1} [color=\"{2}\"];", index, link.to, color)?;
                 }
             }
-            &graph::Object::Entity => {
+            _ => {
                 writeln!(out, "\t{0} [shape=hexagon,label=\"{0}\"];", index)?;
             }
         }
@@ -188,21 +186,18 @@ fn output_as_dot_filtered(
 }
 
 fn output_as_dot(out: &mut io::Write, g: &Graph) -> io::Result<()> {
-    let all_elements: HashSet<graph::Index> =
-        g.objects().map(|object_ref| object_ref.index()).collect();
-    output_as_dot_filtered(out, g, &all_elements)
+    output_as_dot_filtered(out, g, &|_: Index| true)
 }
 
 /*******************************************************************************
  * Matching of graphs against each other.
  * TODO return iterator over possible matches
  */
-
-fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, graph::Index>> {
+fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>> {
     // Used to build a mapping iteratively
     struct MappingBuilder {
-        mapping: HashMap<graph::Index, graph::Index>,
-        matched_pattern_objects_to_inspect: HashSet<graph::Index>,
+        mapping: HashMap<Index, Index>,
+        matched_pattern_objects_to_inspect: HashSet<Index>,
     }
     impl MappingBuilder {
         fn new() -> Self {
@@ -213,7 +208,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
         }
 
         // Returns true if ok, false if conflicts with current matching
-        fn add(&mut self, pattern_object: graph::Index, target_object: graph::Index) -> bool {
+        fn add(&mut self, pattern_object: Index, target_object: Index) -> bool {
             if let Some(&current_matched_target_object) = self.mapping.get(&pattern_object) {
                 current_matched_target_object == target_object
             } else {
@@ -225,7 +220,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
         }
 
         // Pick one from matched_pattern_objects_to_inspect set
-        fn next_matched_pattern_object_to_inspect(&mut self) -> Option<graph::Index> {
+        fn next_matched_pattern_object_to_inspect(&mut self) -> Option<Index> {
             match self.matched_pattern_objects_to_inspect
                 .iter()
                 .cloned()
@@ -244,7 +239,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
 
     // Match atoms, which are unambiguous
     for pattern_object_ref in pattern.objects() {
-        if let &graph::Object::Atom(ref a) = pattern_object_ref.object() {
+        if let &Object::Atom(ref a) = pattern_object_ref.object() {
             if let Some(target_object) = target.get_atom(a) {
                 mapping.add(pattern_object_ref.index(), target_object);
             }
@@ -281,7 +276,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
         }
 
         // Match ends if matched object is link
-        if let &graph::Object::Link(ref pattern_link) = matched_pattern_object_ref.object() {
+        if let &Object::Link(ref pattern_link) = matched_pattern_object_ref.object() {
             let target_link = matched_target_object_ref.object().as_link();
 
             // Match from/to objects
@@ -302,8 +297,8 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<graph::Index, 
 /*******************************************************************************
  * Test
  */
-fn create_name_prop(g: &mut Graph) -> graph::Index {
-    let name_entity = g.create_entity();
+fn create_name_prop(g: &mut Graph) -> Index {
+    let name_entity = g.create_abstract();
     let name_text = g.use_atom(Atom::text("name"));
     let name_entity_description = g.use_link(Link::new(name_text, name_entity));
     let _name_entity_description_description =
@@ -311,8 +306,8 @@ fn create_name_prop(g: &mut Graph) -> graph::Index {
     name_entity
 }
 
-fn create_named_entity(g: &mut Graph, name_entity: graph::Index, text: &str) -> graph::Index {
-    let entity = g.create_entity();
+fn create_named_entity(g: &mut Graph, name_entity: Index, text: &str) -> Index {
+    let entity = g.create_abstract();
     let atom = g.use_atom(Atom::text(text));
     let link = g.use_link(Link::new(atom, entity));
     let _link_description = g.use_link(Link::new(name_entity, link));
@@ -357,22 +352,19 @@ fn main() {
     if args.iter().any(|s| s == "graph") {
         output_as_dot(&mut io::stdout(), &graph).unwrap()
     }
-
     if args.iter().any(|s| s == "pattern") {
         let mut pattern = Graph::new();
         let name_prop = create_name_prop(&mut pattern);
-
         let mapping = match_graph(&pattern, &graph);
         eprintln!("MAPPING {:?}", &mapping);
     }
-
     if args.iter().any(|s| s == "self") {
         // Print the matched part of graph
         let self_mapping = match_graph(&graph, &graph).expect("match failure");
-        let matched_elements: HashSet<graph::Index> = self_mapping.keys().cloned().collect();
-        output_as_dot_filtered(&mut io::stdout(), &graph, &matched_elements).unwrap();
+        output_as_dot_filtered(&mut io::stdout(), &graph, &|i: Index| {
+            self_mapping.contains_key(&i)
+        }).unwrap();
     }
-
     if args.iter().any(|s| s == "wiki") {
         wiki::run(graph)
     }
