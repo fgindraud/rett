@@ -8,25 +8,67 @@ extern crate serde_json;
 #[macro_use]
 extern crate rouille;
 
-/** Knowledge graph.
- */
+#[macro_use]
+extern crate clap;
+
+/// Knowledge graph definition.
 mod graph;
 use graph::{Atom, Graph, Index, Link, Object};
+
+use std::fs::File;
+use std::path::Path;
+
+fn read_graph_from_file(filename: &Path) -> Graph {
+    match File::open(filename) {
+        Ok(file) => match serde_json::from_reader(file) {
+            Ok(graph) => return graph,
+            Err(e) => eprintln!(
+                "Warning: invalid graph format in file {}: {}",
+                filename.display(),
+                e
+            ),
+        },
+        Err(e) => eprintln!(
+            "Warning: cannot read graph from {}: {}",
+            filename.display(),
+            e
+        ),
+    }
+    eprintln!("Using empty graph");
+    Graph::new()
+}
+
+fn write_graph_to_file(filename: &Path, graph: &Graph) {
+    match File::create(filename) {
+        Ok(file) => if let Err(e) = serde_json::to_writer(file, graph) {
+            eprintln!(
+                "Warning: cannot write graph to {}: {}",
+                filename.display(),
+                e
+            )
+        },
+        Err(e) => eprintln!(
+            "Warning: cannot write graph to {}: {}",
+            filename.display(),
+            e
+        ),
+    }
+}
 
 /*******************************************************************************
  */
 mod wiki {
-    use super::graph::Graph;
-    use super::rouille;
+    use super::{read_graph_from_file, rouille, Path};
     use rouille::Response;
-    use std::sync::RwLock;
 
-    pub fn run(graph: Graph) -> ! {
+    pub fn run(addr: &str, db_file: &Path) -> ! {
+        use std::sync::RwLock;
+        let graph = read_graph_from_file(db_file);
         let graph = RwLock::new(graph);
+        eprintln!("Wiki starting on {}", addr,);
 
-        rouille::start_server("localhost:8000", move |request| {
+        rouille::start_server(addr, move |request| {
             // TODO grow from this skeleton
-            // html is the entire page content
             // /: link to all named elements ?
             // /zzz: zzz and its associated stuff
             // Horrorshow templating lib ?
@@ -342,34 +384,64 @@ fn set_test_data(g: &mut Graph) {
     g.use_link(Link::new(date, fight_date));
 }
 
-use std::env;
-
-fn main() {
-    let args: Vec<String> = env::args().collect();
-
+fn do_test(what: &str, db_filename: &Path) {
     let mut graph = Graph::new();
     set_test_data(&mut graph);
 
-    if args.iter().any(|s| s == "serde") {
-        serde_json::to_writer(io::stdout(), &graph).unwrap()
+    if what == "serde" {
+        write_graph_to_file(db_filename, &graph)
     }
-    if args.iter().any(|s| s == "graph") {
+    if what == "graph" {
         output_as_dot(&mut io::stdout(), &graph).unwrap()
     }
-    if args.iter().any(|s| s == "pattern") {
+    if what == "pattern" {
         let mut pattern = Graph::new();
         let name_prop = create_name_prop(&mut pattern);
         let mapping = match_graph(&pattern, &graph);
         eprintln!("MAPPING {:?}", &mapping);
     }
-    if args.iter().any(|s| s == "self") {
+    if what == "self" {
         // Print the matched part of graph
         let self_mapping = match_graph(&graph, &graph).expect("match failure");
         output_as_dot_filtered(&mut io::stdout(), &graph, &|i: Index| {
             self_mapping.contains_key(&i)
         }).unwrap();
     }
-    if args.iter().any(|s| s == "wiki") {
-        wiki::run(graph)
+}
+
+fn main() {
+    use clap::{AppSettings, Arg, SubCommand};
+    let matches = app_from_crate!()
+        .setting(AppSettings::VersionlessSubcommands)
+        .setting(AppSettings::SubcommandRequired)
+        .arg(
+            Arg::with_name("db_file")
+                .help("Path to relation file")
+                .required(true),
+        )
+        .subcommand(
+            SubCommand::with_name("wiki")
+                .about("Run a server with a wiki-like interface to the database")
+                .arg(
+                    Arg::with_name("addr")
+                        .help("Address on which the server will bind")
+                        .default_value("localhost:8000"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("test").about("Run tests").arg(
+                Arg::with_name("what")
+                    .required(true)
+                    .possible_values(&["serde", "graph", "pattern", "self"]),
+            ),
+        )
+        .get_matches();
+
+    let db_filepath = Path::new(matches.value_of_os("db_file").unwrap());
+
+    match matches.subcommand() {
+        ("wiki", Some(args)) => wiki::run(args.value_of("addr").unwrap(), db_filepath),
+        ("test", Some(args)) => do_test(args.value_of("what").unwrap(), db_filepath),
+        _ => panic!("Missing subcommand"),
     }
 }
