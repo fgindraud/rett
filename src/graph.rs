@@ -1,12 +1,13 @@
 use super::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::convert::AsRef;
+use std::fmt;
 use std::ops::Deref;
 
 // TODO remove / update elements semantics
 // TODO pattern matching as needed for the wiki output
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize)]
 pub enum Atom {
     String(String),
     Integer(i32),
@@ -14,6 +15,14 @@ pub enum Atom {
 impl Atom {
     pub fn text<T: Into<String>>(text: T) -> Self {
         Atom::String(text.into())
+    }
+}
+impl fmt::Display for Atom {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Atom::String(ref s) => s.fmt(f),
+            Atom::Integer(i) => i.fmt(f),
+        }
     }
 }
 
@@ -89,6 +98,7 @@ pub struct Graph {
 }
 
 /// Reference an object and its data. Has AsRef and Deref to behave like an Object.
+#[derive(Clone, Copy)]
 pub struct ObjectRef<'a> {
     index: Index,
     object_data: &'a ObjectData,
@@ -105,8 +115,7 @@ impl Graph {
     pub fn new() -> Self {
         Graph {
             objects: Vec::new(),
-            // TODO replace with something supporting partial/fuzzy searches
-            atom_indexes: HashMap::new(),
+            atom_indexes: HashMap::new(), //TODO replace with something supporting partial/fuzzy searches
             link_indexes: HashMap::new(),
         }
     }
@@ -223,13 +232,25 @@ impl<'a> Deref for ObjectRef<'a> {
 }
 
 impl Object {
-    // FIXME not very structured like. keep or improve depending on use cases
+    pub fn is_atom(&self) -> bool {
+        match *self {
+            Object::Atom(_) => true,
+            _ => false,
+        }
+    }
     pub fn is_link(&self) -> bool {
         match *self {
             Object::Link(_) => true,
             _ => false,
         }
     }
+    pub fn is_abstract(&self) -> bool {
+        match *self {
+            Object::Abstract => true,
+            _ => false,
+        }
+    }
+    // FIXME not very structured like. keep or improve depending on use cases
     pub fn as_link(&self) -> &Link {
         match *self {
             Object::Link(ref l) => l,

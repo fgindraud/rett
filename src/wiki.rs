@@ -1,12 +1,58 @@
-use super::graph::{Graph, Index, ObjectRef};
+use super::graph::{Graph, Index, Object, ObjectRef};
 use super::horrorshow::helper::doctype;
 use super::read_graph_from_file;
 use super::rouille;
 use rouille::Response;
 use std::path::Path;
 
-fn page_for_object<'a>(object: ObjectRef<'a>, _graph: &'a Graph) -> Response {
-    let title = format!("Object {}", object.index());
+fn title_for_object<'a>(object: ObjectRef<'a>, _graph: &'a Graph) -> String {
+    match *object {
+        Object::Atom(ref a) => format!("{}", a),
+        Object::Link(ref l) => format!("{} → {}", l.from, l.to),
+        Object::Abstract => format!("Object {}", object.index()),
+    }
+}
+
+fn page_listing(graph: &Graph) -> Response {
+    Response::html(format!(
+        "{}",
+        html! {
+            : doctype::HTML;
+            head {
+                title : "Object list";
+            }
+            body {
+                h1 : "Atoms";
+                ul {
+                    @ for object in graph.objects().filter(|o| o.is_atom()) {
+                        li {
+                            a(href=format!("/id/{}", object.index())) : title_for_object(object, graph);
+                        }
+                    }
+                }
+                h1 : "Abstract";
+                ul {
+                    @ for object in graph.objects().filter(|o| o.is_abstract()) {
+                        li {
+                            a(href=format!("/id/{}", object.index())) : title_for_object(object, graph);
+                        }
+                    }
+                }
+                h1 : "Links";
+                ul {
+                    @ for object in graph.objects().filter(|o| o.is_link()) {
+                        li {
+                            a(href=format!("/id/{}", object.index())) : title_for_object(object, graph);
+                        }
+                    }
+                }
+            }
+        }
+    ))
+}
+
+fn page_for_object<'a>(object: ObjectRef<'a>, graph: &'a Graph) -> Response {
+    let title = title_for_object(object, graph);
     let details = format!("{:?}", *object);
     Response::html(format!(
         "{}",
@@ -14,7 +60,7 @@ fn page_for_object<'a>(object: ObjectRef<'a>, _graph: &'a Graph) -> Response {
             : doctype::HTML;
             html {
                 head {
-                    title : &title
+                    title : &title;
                 }
                 body {
                     h1 : &title;
@@ -40,12 +86,15 @@ pub fn run(addr: &str, db_file: &Path) -> ! {
 
     rouille::start_server(addr, move |request| {
         router!(request,
-            (GET) (/id/{id: Index}) => {
+            (GET) ["/"] => {
+                page_listing(&graph.read().unwrap())
+            },
+            (GET) ["/id/{id}", id: Index] => {
                 page_for_index(id, &graph.read().unwrap())
             },
             _ => {
                 Response::empty_404()
             }
-            )
+        )
     })
 }

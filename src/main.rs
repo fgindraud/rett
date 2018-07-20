@@ -63,7 +63,6 @@ fn write_graph_to_file(filename: &Path, graph: &Graph) {
 /*****************************************************************************
  */
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 use std::io;
 
 /// Output graph as dot.
@@ -96,15 +95,6 @@ fn output_as_dot_filtered(
         "#332288", "#88CCEE", "#44AA99", "#117733", "#999933", "#DDCC77", "#CC6677", "#882255",
         "#AA4499",
     ];
-
-    impl fmt::Display for Atom {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            match *self {
-                Atom::String(ref s) => write!(f, "\\\"{}\\\"", s),
-                Atom::Integer(i) => i.fmt(f),
-            }
-        }
-    }
 
     let link_color_indexes = {
         // Table to store color assignements for previously colored Links.
