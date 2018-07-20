@@ -6,12 +6,14 @@ extern crate serde_json;
 
 // Wiki
 #[macro_use]
-extern crate rouille;
+extern crate rouille; // Simple http server
 #[macro_use]
-extern crate horrorshow;
+extern crate horrorshow; // HTML template engine
+#[macro_use]
+extern crate rust_embed; // Embed files in executable
 
 #[macro_use]
-extern crate clap;
+extern crate clap; // Command line parser
 
 /// Knowledge graph definition.
 mod graph;

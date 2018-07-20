@@ -6,6 +6,33 @@ use horrorshow::{Render, RenderOnce, Template};
 use rouille::Response;
 use std::path::Path;
 
+pub fn run(addr: &str, db_file: &Path) -> ! {
+    use std::sync::RwLock;
+    let graph = read_graph_from_file(db_file);
+    let graph = RwLock::new(graph);
+    eprintln!("Wiki starting on {}", addr,);
+
+    rouille::start_server(addr, move |request| {
+        router!(request,
+            (GET) ["/"] => {
+                page_main()
+            },
+            (GET) ["/all"] => {
+                page_all_objects(&graph.read().unwrap())
+            },
+            (GET) ["/id/{id}", id: Index] => {
+                page_for_index(id, &graph.read().unwrap())
+            },
+            (GET) ["/{asset}", asset: String] => {
+                send_asset(&asset)
+            },
+            _ => {
+                Response::empty_404()
+            }
+        )
+    })
+}
+
 trait ToUrl {
     fn to_url(&self) -> String;
 }
@@ -24,9 +51,15 @@ where
         : horrorshow::helper::doctype::HTML;
         html {
             head {
+                link(rel="stylesheet", type="text/css", href="/style.css");
                 title : title;
             }
             body {
+                nav {
+                    a(href="/") : "Main page"; br;
+                    a(href="/all") : "All objects"; br;
+                    // TODO add doc.html
+                }
                 : content;
             }
         }
@@ -40,6 +73,11 @@ fn title_for_object<'a>(object: ObjectRef<'a>, _graph: &'a Graph) -> String {
         Object::Link(ref l) => format!("{} → {}", l.from, l.to),
         Object::Abstract => format!("Object {}", object.index()),
     }
+}
+
+fn page_main() -> Response {
+    // TODO list things pointed by _main
+    wiki_page("Main page", html! { p : "TODO"; })
 }
 
 fn page_all_objects(graph: &Graph) -> Response {
@@ -75,6 +113,7 @@ fn page_all_objects(graph: &Graph) -> Response {
 }
 
 fn page_for_object<'a>(object: ObjectRef<'a>, graph: &'a Graph) -> Response {
+    // TODO use aside tag for edit box ?
     let title = title_for_object(object, graph);
     let details: Box<Render> = match *object {
         Object::Atom(ref a) => box_html! { : a.to_string(); },
@@ -124,23 +163,23 @@ fn page_for_index(index: Index, graph: &Graph) -> Response {
     }
 }
 
-pub fn run(addr: &str, db_file: &Path) -> ! {
-    use std::sync::RwLock;
-    let graph = read_graph_from_file(db_file);
-    let graph = RwLock::new(graph);
-    eprintln!("Wiki starting on {}", addr,);
+/* Wiki external files.
+ * Static files are much easier to edit as standalone.
+ * Use rust_embed to embed them in the binary (on release mode only).
+ */
+#[derive(RustEmbed)]
+#[folder = "wiki/"]
+struct Asset;
 
-    rouille::start_server(addr, move |request| {
-        router!(request,
-            (GET) ["/all"] => {
-                page_all_objects(&graph.read().unwrap())
-            },
-            (GET) ["/id/{id}", id: Index] => {
-                page_for_index(id, &graph.read().unwrap())
-            },
-            _ => {
-                Response::empty_404()
-            }
-        )
-    })
+fn send_asset(path: &str) -> Response {
+    if let Some(asset) = Asset::get(path) {
+        let content_type = match path {
+            path if path.ends_with(".css") => "text/css",
+            path if path.ends_with(".html") => "text/html",
+            _ => "application/octet-stream",
+        };
+        Response::from_data(content_type, asset).with_public_cache(3600)
+    } else {
+        Response::empty_404()
+    }
 }
