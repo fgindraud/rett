@@ -1,7 +1,8 @@
 use super::graph::{Graph, Index, Object, ObjectRef};
-use super::horrorshow::{helper::doctype, Render};
+use super::horrorshow;
 use super::read_graph_from_file;
 use super::rouille;
+use horrorshow::{Render, RenderOnce, Template};
 use rouille::Response;
 use std::path::Path;
 
@@ -14,56 +15,69 @@ impl ToUrl for Index {
     }
 }
 
+fn wiki_page<T, C>(title: T, content: C) -> Response
+where
+    T: RenderOnce,
+    C: RenderOnce,
+{
+    let template = html! {
+        : horrorshow::helper::doctype::HTML;
+        html {
+            head {
+                title : title;
+            }
+            body {
+                : content;
+            }
+        }
+    };
+    Response::html(template.into_string().unwrap())
+}
+
 fn title_for_object<'a>(object: ObjectRef<'a>, _graph: &'a Graph) -> String {
     match *object {
-        Object::Atom(ref a) => format!("{}", a),
+        Object::Atom(ref a) => a.to_string(),
         Object::Link(ref l) => format!("{} → {}", l.from, l.to),
         Object::Abstract => format!("Object {}", object.index()),
     }
 }
 
 fn page_all_objects(graph: &Graph) -> Response {
-    Response::html(format!(
-        "{}",
+    wiki_page(
+        "Object list",
         html! {
-            : doctype::HTML;
-            head {
-                title : "Object list";
-            }
-            body {
-                h1 : "Atoms";
-                ul {
-                    @ for object in graph.objects().filter(|o| o.is_atom()) {
-                        li {
-                            a(href=object.index().to_url()) : title_for_object(object, graph);
-                        }
-                    }
-                }
-                h1 : "Abstract";
-                ul {
-                    @ for object in graph.objects().filter(|o| o.is_abstract()) {
-                        li {
-                            a(href=object.index().to_url()) : title_for_object(object, graph);
-                        }
-                    }
-                }
-                h1 : "Links";
-                ul {
-                    @ for object in graph.objects().filter(|o| o.is_link()) {
-                        li {
-                            a(href=object.index().to_url()) : title_for_object(object, graph);
-                        }
+            h1 : "Atoms";
+            ul {
+                @ for object in graph.objects().filter(|o| o.is_atom()) {
+                    li {
+                        a(href=object.index().to_url()) : title_for_object(object, graph);
                     }
                 }
             }
-        }
-    ))
+            h1 : "Abstract";
+            ul {
+                @ for object in graph.objects().filter(|o| o.is_abstract()) {
+                    li {
+                        a(href=object.index().to_url()) : title_for_object(object, graph);
+                    }
+                }
+            }
+            h1 : "Links";
+            ul {
+                @ for object in graph.objects().filter(|o| o.is_link()) {
+                    li {
+                        a(href=object.index().to_url()) : title_for_object(object, graph);
+                    }
+                }
+            }
+        },
+    )
 }
 
 fn page_for_object<'a>(object: ObjectRef<'a>, graph: &'a Graph) -> Response {
     let title = title_for_object(object, graph);
     let details: Box<Render> = match *object {
-        Object::Atom(ref a) => box_html! { : format!("{}", a); },
+        Object::Atom(ref a) => box_html! { : a.to_string(); },
         Object::Link(ref l) => box_html! {
             ul {
                 li {
@@ -78,37 +92,29 @@ fn page_for_object<'a>(object: ObjectRef<'a>, graph: &'a Graph) -> Response {
         },
         Object::Abstract => box_html! { : "Abstract"; },
     };
-    Response::html(format!(
-        "{}",
+    wiki_page(
+        &title,
         html! {
-            : doctype::HTML;
-            html {
-                head {
-                    title : &title;
-                }
-                body {
-                    h1 : &title;
-                    p : &details;
-                    h2 : "Linked from";
-                    ul {
-                        @ for object in object.in_links().iter().map(|i| graph.object(*i)) {
-                            li {
-                                a(href=object.index().to_url()) : title_for_object(object, graph);
-                            }
-                        }
-                    }
-                    h2 : "Linked to";
-                    ul {
-                        @ for object in object.out_links().iter().map(|i| graph.object(*i)) {
-                            li {
-                                a(href=object.index().to_url()) : title_for_object(object, graph);
-                            }
-                        }
+            h1 : &title;
+            p : &details;
+            h2 : "Linked from";
+            ul {
+                @ for object in object.in_links().iter().map(|i| graph.object(*i)) {
+                    li {
+                        a(href=object.index().to_url()) : title_for_object(object, graph);
                     }
                 }
             }
-        }
-    ))
+            h2 : "Linked to";
+            ul {
+                @ for object in object.out_links().iter().map(|i| graph.object(*i)) {
+                    li {
+                        a(href=object.index().to_url()) : title_for_object(object, graph);
+                    }
+                }
+            }
+        },
+    )
 }
 
 fn page_for_index(index: Index, graph: &Graph) -> Response {
