@@ -21,7 +21,10 @@ pub fn run(addr: &str, db_file: &Path) -> ! {
                 page_all_objects(&graph.read().unwrap())
             },
             (GET) ["/id/{id}", id: Index] => {
-                page_for_index(id, &graph.read().unwrap())
+                match graph.read().unwrap().get_object(id) {
+                    Some(object) => page_for_object(object),
+                    None => Response::empty_404(),
+                }
             },
             (GET) ["/{asset}", asset: String] => {
                 send_asset(&asset)
@@ -67,7 +70,7 @@ where
     Response::html(template.into_string().unwrap())
 }
 
-fn title_for_object<'a>(object: ObjectRef<'a>, _graph: &'a Graph) -> String {
+fn title_for_object<'a>(object: ObjectRef<'a>) -> String {
     match *object {
         Object::Atom(ref a) => a.to_string(),
         Object::Link(ref l) => format!("{} → {}", l.from, l.to),
@@ -88,7 +91,7 @@ fn page_all_objects(graph: &Graph) -> Response {
             ul {
                 @ for object in graph.objects().filter(|o| o.is_atom()) {
                     li {
-                        a(href=object.index().to_url()) : title_for_object(object, graph);
+                        a(href=object.index().to_url()) : title_for_object(object);
                     }
                 }
             }
@@ -96,7 +99,7 @@ fn page_all_objects(graph: &Graph) -> Response {
             ul {
                 @ for object in graph.objects().filter(|o| o.is_abstract()) {
                     li {
-                        a(href=object.index().to_url()) : title_for_object(object, graph);
+                        a(href=object.index().to_url()) : title_for_object(object);
                     }
                 }
             }
@@ -104,7 +107,7 @@ fn page_all_objects(graph: &Graph) -> Response {
             ul {
                 @ for object in graph.objects().filter(|o| o.is_link()) {
                     li {
-                        a(href=object.index().to_url()) : title_for_object(object, graph);
+                        a(href=object.index().to_url()) : title_for_object(object);
                     }
                 }
             }
@@ -112,20 +115,21 @@ fn page_all_objects(graph: &Graph) -> Response {
     )
 }
 
-fn page_for_object<'a>(object: ObjectRef<'a>, graph: &'a Graph) -> Response {
+fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
     // TODO use aside tag for edit box ?
-    let title = title_for_object(object, graph);
+    let graph = object.graph();
+    let title = title_for_object(object);
     let details: Box<Render> = match *object {
         Object::Atom(ref a) => box_html! { : a.to_string(); },
         Object::Link(ref l) => box_html! {
             ul {
                 li {
                     : "From ";
-                    a(href=l.from.to_url()) : title_for_object(graph.object(l.from), graph);
+                    a(href=l.from.to_url()) : title_for_object(graph.object(l.from));
                 }
                 li {
                     : "To ";
-                    a(href=l.to.to_url()) : title_for_object(graph.object(l.to), graph);
+                    a(href=l.to.to_url()) : title_for_object(graph.object(l.to));
                 }
             }
         },
@@ -140,7 +144,7 @@ fn page_for_object<'a>(object: ObjectRef<'a>, graph: &'a Graph) -> Response {
             ul {
                 @ for object in object.in_links().iter().map(|i| graph.object(*i)) {
                     li {
-                        a(href=object.index().to_url()) : title_for_object(object, graph);
+                        a(href=object.index().to_url()) : title_for_object(object);
                     }
                 }
             }
@@ -148,19 +152,12 @@ fn page_for_object<'a>(object: ObjectRef<'a>, graph: &'a Graph) -> Response {
             ul {
                 @ for object in object.out_links().iter().map(|i| graph.object(*i)) {
                     li {
-                        a(href=object.index().to_url()) : title_for_object(object, graph);
+                        a(href=object.index().to_url()) : title_for_object(object);
                     }
                 }
             }
         },
     )
-}
-
-fn page_for_index(index: Index, graph: &Graph) -> Response {
-    match graph.get_object(index) {
-        Some(object) => page_for_object(object, graph),
-        None => Response::empty_404(),
-    }
 }
 
 /* Wiki external files.

@@ -97,19 +97,6 @@ pub struct Graph {
     link_indexes: HashMap<Link, Index>,
 }
 
-/// Reference an object and its data. Has AsRef and Deref to behave like an Object.
-#[derive(Clone, Copy)]
-pub struct ObjectRef<'a> {
-    index: Index,
-    object_data: &'a ObjectData,
-}
-
-/// Iterate on objects in order of increasing indexes.
-pub struct OrderedObjectIterator<'a> {
-    next_index: usize,
-    graph: &'a Graph,
-}
-
 impl Graph {
     /// Create a new empty graph.
     pub fn new() -> Self {
@@ -126,6 +113,7 @@ impl Graph {
             Some(&Some(ref object_data)) => Some(ObjectRef {
                 index: index,
                 object_data: object_data,
+                graph: self,
             }),
             _ => None,
         }
@@ -208,9 +196,19 @@ impl Graph {
     }
 }
 
+/// Reference an object and its data. Has AsRef and Deref to behave like an Object.
+#[derive(Clone, Copy)]
+pub struct ObjectRef<'a> {
+    index: Index,
+    object_data: &'a ObjectData,
+    graph: &'a Graph,
+}
 impl<'a> ObjectRef<'a> {
     pub fn index(&self) -> Index {
         self.index
+    }
+    pub fn graph(&self) -> &Graph {
+        &self.graph
     }
     pub fn in_links(&self) -> &'a Vec<Index> {
         &self.object_data.in_links
@@ -259,6 +257,11 @@ impl Object {
     }
 }
 
+/// Iterate on objects in order of increasing indexes.
+pub struct OrderedObjectIterator<'a> {
+    next_index: usize,
+    graph: &'a Graph,
+}
 impl<'a> Iterator for OrderedObjectIterator<'a> {
     type Item = ObjectRef<'a>;
     fn next(&mut self) -> Option<Self::Item> {
