@@ -15,7 +15,7 @@ pub fn run(addr: &str, db_file: &Path) -> ! {
     rouille::start_server(addr, move |request| {
         router!(request,
             (GET) ["/"] => {
-                page_main()
+                main_page(&graph.read().unwrap())
             },
             (GET) ["/all"] => {
                 page_all_objects(&graph.read().unwrap())
@@ -58,7 +58,7 @@ where
                 nav {
                     a(href="/") : "Main page"; br;
                     a(href="/all") : "All objects"; br;
-                    // TODO add doc.html
+                    a(href="/doc.html") : "Help"; br;
                 }
                 : content;
             }
@@ -75,8 +75,8 @@ fn title_for_object<'a>(object: ObjectRef<'a>, _graph: &'a Graph) -> String {
     }
 }
 
-fn page_main() -> Response {
-    // TODO list things pointed by _main
+fn main_page(graph: &Graph) -> Response {
+    // TODO redirect to page pointed by _wiki_main
     wiki_page("Main page", html! { p : "TODO"; })
 }
 
