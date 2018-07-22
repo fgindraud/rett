@@ -61,6 +61,11 @@ use horrorshow::{self, Render, RenderOnce, Template};
 use rouille::{self, Request, Response};
 use std::path::Path;
 
+enum LinkSide {
+    From,
+    To,
+}
+
 /******************************************************************************
  * HTTP server.
  */
@@ -81,6 +86,19 @@ pub fn run(addr: &str, file: &Path) -> ! {
             (POST) ["/create/atom"] => { post_create_atom(request, &mut db.modify()) },
             (GET) ["/create/abstract"] => { page_create_abstract() },
             (POST) ["/create/abstract"] => { post_create_abstract(request, &mut db.modify()) },
+            (GET) ["/create/link/from/{id}", id: Index] => {
+                match db.access ().get_object(id) {
+                    Some(object) => page_create_link(object, LinkSide::From),
+                    None => Response::empty_404(),
+                }
+            },
+            (GET) ["/create/link/to/{id}", id: Index] => {
+                match db.access ().get_object(id) {
+                    Some(object) => page_create_link(object, LinkSide::To),
+                    None => Response::empty_404(),
+                }
+            },
+            (POST) ["/create/link"] => { post_create_link(request, &mut db.modify()) },
             (GET) ["/{asset}", asset: String] => { send_asset(&asset) },
             _ => { Response::empty_404() }
         )
@@ -91,8 +109,8 @@ pub fn run(addr: &str, file: &Path) -> ! {
  * Wiki page generation.
  * TODO page_object : remove, link_to, link_from
  * TODO page_orphan : not linked from _wiki_main
- * TODO create links
  * TODO provide suggestions for atoms (fuzzy seach in atom list)
+ * TODO improve node selection system
  */
 trait ToUrl {
     fn to_url(&self) -> String;
@@ -210,6 +228,9 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
             h1 : &title;
             p : &details;
             h2 : "Linked from";
+            p {
+                a(href=format!("/create/link/to/{}", object.index())) : "Add";
+            }
             ul {
                 @ for object in object.in_links().iter().map(|i| graph.object(*i)) {
                     li {
@@ -217,7 +238,10 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
                     }
                 }
             }
-            h2 : "Linked to";
+            h2 : "Links to";
+            p {
+                a(href=format!("/create/link/from/{}", object.index())) : "Add";
+            }
             ul {
                 @ for object in object.out_links().iter().map(|i| graph.object(*i)) {
                     li {
@@ -269,6 +293,47 @@ fn post_create_abstract(request: &Request, graph: &mut Graph) -> Response {
         graph.use_link(Link::new(atom, abstract_index));
     }
     Response::redirect_303(abstract_index.to_url())
+}
+
+fn page_create_link<'a>(object: ObjectRef<'a>, link_side: LinkSide) -> Response {
+    let defined_link_side_text = match link_side {
+        LinkSide::From => "from",
+        LinkSide::To => "to",
+    };
+    let undefined_link_side_text = match link_side {
+        LinkSide::From => "to",
+        LinkSide::To => "from",
+    };
+    let graph = object.graph();
+    wiki_page(
+        format!(
+            "Create link {} {}",
+            defined_link_side_text,
+            title_for_object(object)
+        ),
+        html!{
+            form(method="post", action="/create/link") {
+                input(type="hidden", name=defined_link_side_text, value=object.index());
+                @ for object in graph.objects() {
+                    input(type="radio", name=undefined_link_side_text, value=object.index()) {
+                        : title_for_object(object);
+                    }
+                    br;
+                }
+                input(type="submit", value="Create");
+            }
+        },
+    )
+}
+fn post_create_link(request: &Request, graph: &mut Graph) -> Response {
+    let l = try_or_400!(post_input!(request, { from: Index, to: Index }));
+    if let (Some(_), Some(_)) = (graph.get_object(l.from), graph.get_object(l.to)) {
+        // Indexes are valid TODO validate in graph
+        let index = graph.use_link(Link::new(l.from, l.to));
+        Response::redirect_303(index.to_url())
+    } else {
+        Response::empty_400()
+    }
 }
 
 /* Wiki external files.
