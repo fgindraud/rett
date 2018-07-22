@@ -4,26 +4,75 @@ use super::rouille;
 use super::{read_graph_from_file, write_graph_to_file};
 use horrorshow::{Render, RenderOnce, Template};
 use rouille::{Request, Response};
-use std::path::Path;
+use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-pub fn run(addr: &str, db_file: &Path) -> ! {
-    use std::sync::RwLock;
-    // TODO introduce a struct wrapping graph and file writing
-    let db_file = db_file.to_owned();
-    let graph = read_graph_from_file(&db_file);
-    let graph = RwLock::new(graph);
+/******************************************************************************
+ * Database concurrent access and writing logic.
+ */
+struct Database {
+    file: PathBuf,
+    graph: RwLock<Graph>,
+}
+impl Database {
+    /// Initialize graph from file content.
+    fn from_file(file: &Path) -> Self {
+        Database {
+            file: file.to_owned(),
+            graph: RwLock::new(read_graph_from_file(file)),
+        }
+    }
+    /// Get read only access to the database.
+    fn access(&self) -> RwLockReadGuard<Graph> {
+        self.graph.read().unwrap()
+    }
+    /// Get write access to the database ; writes database to disk when lock is released.
+    fn modify<'a>(&'a self) -> DatabaseWriteLock<'a> {
+        DatabaseWriteLock {
+            file: &self.file,
+            lock: self.graph.write().unwrap(),
+        }
+    }
+}
+struct DatabaseWriteLock<'a> {
+    file: &'a Path,
+    lock: RwLockWriteGuard<'a, Graph>,
+}
+impl<'a> Deref for DatabaseWriteLock<'a> {
+    type Target = Graph;
+    fn deref(&self) -> &Graph {
+        &self.lock
+    }
+}
+impl<'a> DerefMut for DatabaseWriteLock<'a> {
+    fn deref_mut(&mut self) -> &mut Graph {
+        &mut self.lock
+    }
+}
+impl<'a> Drop for DatabaseWriteLock<'a> {
+    fn drop(&mut self) {
+        write_graph_to_file(self.file, &self.lock)
+    }
+}
+
+/******************************************************************************
+ * HTTP server.
+ */
+pub fn run(addr: &str, file: &Path) -> ! {
+    let db = Database::from_file(file);
     eprintln!("Wiki starting on {}", addr);
 
     rouille::start_server(addr, move |request| {
         router!(request,
             (GET) ["/"] => {
-                main_page(&graph.read().unwrap())
+                main_page(&db.access())
             },
             (GET) ["/all"] => {
-                page_all_objects(&graph.read().unwrap())
+                page_all_objects(&db.access())
             },
             (GET) ["/id/{id}", id: Index] => {
-                match graph.read().unwrap().get_object(id) {
+                match db.access ().get_object(id) {
                     Some(object) => page_for_object(object),
                     None => Response::empty_404(),
                 }
@@ -32,10 +81,7 @@ pub fn run(addr: &str, db_file: &Path) -> ! {
                 page_create_atom()
             },
             (POST) ["/create/atom"] => {
-                let mut graph = graph.write().unwrap();
-                let response = post_create_atom(request, &mut graph);
-                write_graph_to_file(&db_file, &graph);
-                response
+                post_create_atom(request, &mut db.modify())
             },
             (GET) ["/{asset}", asset: String] => {
                 send_asset(&asset)
@@ -56,6 +102,9 @@ impl ToUrl for Index {
     }
 }
 
+/******************************************************************************
+ * Wiki page generation.
+ */
 fn wiki_page<T, C>(title: T, content: C) -> Response
 where
     T: RenderOnce,
@@ -65,6 +114,7 @@ where
         ("Home", "/"),
         ("All", "/all"),
         ("New atom", "/create/atom"),
+        ("New abstract", "/create/abstract"),
         ("Help", "/doc.html"),
     ];
     let template = html! {
