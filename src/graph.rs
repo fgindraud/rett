@@ -9,18 +9,18 @@ use std::ops::Deref;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize)]
 pub enum Atom {
-    String(String),
+    Text(String),
     Integer(i32),
 }
 impl Atom {
     pub fn text<T: Into<String>>(text: T) -> Self {
-        Atom::String(text.into())
+        Atom::Text(text.into())
     }
 }
 impl fmt::Display for Atom {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Atom::String(ref s) => s.fmt(f),
+            Atom::Text(ref s) => s.fmt(f),
             Atom::Integer(i) => i.fmt(f),
         }
     }

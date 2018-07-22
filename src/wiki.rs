@@ -1,16 +1,18 @@
-use super::graph::{Graph, Index, Object, ObjectRef};
+use super::graph::{Atom, Graph, Index, Object, ObjectRef};
 use super::horrorshow;
-use super::read_graph_from_file;
 use super::rouille;
+use super::{read_graph_from_file, write_graph_to_file};
 use horrorshow::{Render, RenderOnce, Template};
-use rouille::Response;
+use rouille::{Request, Response};
 use std::path::Path;
 
 pub fn run(addr: &str, db_file: &Path) -> ! {
     use std::sync::RwLock;
-    let graph = read_graph_from_file(db_file);
+    // TODO introduce a struct wrapping graph and file writing
+    let db_file = db_file.to_owned();
+    let graph = read_graph_from_file(&db_file);
     let graph = RwLock::new(graph);
-    eprintln!("Wiki starting on {}", addr,);
+    eprintln!("Wiki starting on {}", addr);
 
     rouille::start_server(addr, move |request| {
         router!(request,
@@ -25,6 +27,15 @@ pub fn run(addr: &str, db_file: &Path) -> ! {
                     Some(object) => page_for_object(object),
                     None => Response::empty_404(),
                 }
+            },
+            (GET) ["/create/atom"] => {
+                page_create_atom()
+            },
+            (POST) ["/create/atom"] => {
+                let mut graph = graph.write().unwrap();
+                let response = post_create_atom(request, &mut graph);
+                write_graph_to_file(&db_file, &graph);
+                response
             },
             (GET) ["/{asset}", asset: String] => {
                 send_asset(&asset)
@@ -50,6 +61,12 @@ where
     T: RenderOnce,
     C: RenderOnce,
 {
+    let navigation = [
+        ("Home", "/"),
+        ("All", "/all"),
+        ("New atom", "/create/atom"),
+        ("Help", "/doc.html"),
+    ];
     let template = html! {
         : horrorshow::helper::doctype::HTML;
         html {
@@ -59,9 +76,13 @@ where
             }
             body {
                 nav {
-                    a(href="/") : "Main page"; br;
-                    a(href="/all") : "All objects"; br;
-                    a(href="/doc.html") : "Help"; br;
+                    ul {
+                        @ for (name, url) in navigation.iter() {
+                            li {
+                                a(href=url) : name;
+                            }
+                        }
+                    }
                 }
                 : content;
             }
@@ -158,6 +179,25 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
             }
         },
     )
+}
+
+fn page_create_atom() -> Response {
+    wiki_page(
+        "Create atom",
+        html!{
+            form(method="post") {
+                : "Value:";
+                input(type="text", name="text");
+                input(type="submit", value="Create");
+            }
+        },
+    )
+}
+fn post_create_atom(request: &Request, graph: &mut Graph) -> Response {
+    let form_data = try_or_400!(post_input!(request, { text: String }));
+    let text = form_data.text.trim();
+    let index = graph.use_atom(Atom::text(text));
+    Response::redirect_303(index.to_url())
 }
 
 /* Wiki external files.
