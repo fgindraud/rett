@@ -107,7 +107,7 @@ pub fn run(addr: &str, file: &Path) -> ! {
 
 /******************************************************************************
  * Wiki page generation.
- * TODO page_object : remove, link_to, link_from
+ * TODO page_object : remove
  * TODO page_orphan : not linked from _wiki_main
  * TODO provide suggestions for atoms (fuzzy seach in atom list)
  * TODO improve node selection system
@@ -166,8 +166,21 @@ where
 }
 
 fn main_page(graph: &Graph) -> Response {
-    // TODO redirect to page pointed by _wiki_main
-    wiki_page("Main page", html! { p : "TODO"; })
+    if let Some(wiki_main_index) = graph.get_atom(&Atom::text("_wiki_main")) {
+        let wiki_main = graph.object(wiki_main_index);
+        if let Some(&out_link_id) = wiki_main.out_links().first() {
+            let out_link = graph.object(out_link_id);
+            if let Object::Link(ref l) = *graph.object(out_link_id) {
+                return Response::redirect_303(l.to.to_url());
+            }
+        }
+    }
+    wiki_page(
+        "Main page",
+        html! {
+            p : "Create a link from \"_wiki_main\" to a graph object to define it as the home page.";
+        },
+    )
 }
 
 fn page_all_objects(graph: &Graph) -> Response {
@@ -203,7 +216,6 @@ fn page_all_objects(graph: &Graph) -> Response {
 }
 
 fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
-    // TODO use aside tag for edit box ?
     let graph = object.graph();
     let title = title_for_object(object);
     let details: Box<Render> = match *object {
