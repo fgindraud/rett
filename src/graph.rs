@@ -102,7 +102,7 @@ impl Graph {
     pub fn new() -> Self {
         Graph {
             objects: Vec::new(),
-            atom_indexes: HashMap::new(), //TODO replace with something supporting partial/fuzzy searches
+            atom_indexes: HashMap::new(),
             link_indexes: HashMap::new(),
         }
     }

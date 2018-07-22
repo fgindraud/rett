@@ -1,98 +1,99 @@
-use super::graph::{Atom, Graph, Index, Object, ObjectRef};
-use super::horrorshow;
-use super::rouille;
-use super::{read_graph_from_file, write_graph_to_file};
-use horrorshow::{Render, RenderOnce, Template};
-use rouille::{Request, Response};
-use std::ops::{Deref, DerefMut};
-use std::path::{Path, PathBuf};
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-
 /******************************************************************************
  * Database concurrent access and writing logic.
+ * In its own module to scope the use;
  */
-struct Database {
-    file: PathBuf,
-    graph: RwLock<Graph>,
-}
-impl Database {
-    /// Initialize graph from file content.
-    fn from_file(file: &Path) -> Self {
-        Database {
-            file: file.to_owned(),
-            graph: RwLock::new(read_graph_from_file(file)),
+mod database {
+    use graph::Graph;
+    use read_graph_from_file;
+    use std::ops::{Deref, DerefMut};
+    use std::path::{Path, PathBuf};
+    use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+    use write_graph_to_file;
+
+    pub struct Database {
+        file: PathBuf,
+        graph: RwLock<Graph>,
+    }
+    impl Database {
+        /// Initialize graph from file content.
+        pub fn from_file(file: &Path) -> Self {
+            Database {
+                file: file.to_owned(),
+                graph: RwLock::new(read_graph_from_file(file)),
+            }
+        }
+        /// Get read only access to the database.
+        pub fn access(&self) -> RwLockReadGuard<Graph> {
+            self.graph.read().unwrap()
+        }
+        /// Get write access to the database ; writes database to disk when lock is released.
+        pub fn modify<'a>(&'a self) -> DatabaseWriteLock<'a> {
+            DatabaseWriteLock {
+                file: &self.file,
+                lock: self.graph.write().unwrap(),
+            }
         }
     }
-    /// Get read only access to the database.
-    fn access(&self) -> RwLockReadGuard<Graph> {
-        self.graph.read().unwrap()
+    pub struct DatabaseWriteLock<'a> {
+        file: &'a Path,
+        lock: RwLockWriteGuard<'a, Graph>,
     }
-    /// Get write access to the database ; writes database to disk when lock is released.
-    fn modify<'a>(&'a self) -> DatabaseWriteLock<'a> {
-        DatabaseWriteLock {
-            file: &self.file,
-            lock: self.graph.write().unwrap(),
+    impl<'a> Deref for DatabaseWriteLock<'a> {
+        type Target = Graph;
+        fn deref(&self) -> &Graph {
+            &self.lock
+        }
+    }
+    impl<'a> DerefMut for DatabaseWriteLock<'a> {
+        fn deref_mut(&mut self) -> &mut Graph {
+            &mut self.lock
+        }
+    }
+    impl<'a> Drop for DatabaseWriteLock<'a> {
+        fn drop(&mut self) {
+            write_graph_to_file(self.file, &self.lock)
         }
     }
 }
-struct DatabaseWriteLock<'a> {
-    file: &'a Path,
-    lock: RwLockWriteGuard<'a, Graph>,
-}
-impl<'a> Deref for DatabaseWriteLock<'a> {
-    type Target = Graph;
-    fn deref(&self) -> &Graph {
-        &self.lock
-    }
-}
-impl<'a> DerefMut for DatabaseWriteLock<'a> {
-    fn deref_mut(&mut self) -> &mut Graph {
-        &mut self.lock
-    }
-}
-impl<'a> Drop for DatabaseWriteLock<'a> {
-    fn drop(&mut self) {
-        write_graph_to_file(self.file, &self.lock)
-    }
-}
+
+use graph::{Atom, Graph, Index, Link, Object, ObjectRef};
+use horrorshow::{self, Render, RenderOnce, Template};
+use rouille::{self, Request, Response};
+use std::path::Path;
 
 /******************************************************************************
  * HTTP server.
  */
 pub fn run(addr: &str, file: &Path) -> ! {
-    let db = Database::from_file(file);
+    let db = database::Database::from_file(file);
     eprintln!("Wiki starting on {}", addr);
-
     rouille::start_server(addr, move |request| {
         router!(request,
-            (GET) ["/"] => {
-                main_page(&db.access())
-            },
-            (GET) ["/all"] => {
-                page_all_objects(&db.access())
-            },
+            (GET) ["/"] => { main_page(&db.access()) },
+            (GET) ["/all"] => { page_all_objects(&db.access()) },
             (GET) ["/id/{id}", id: Index] => {
                 match db.access ().get_object(id) {
                     Some(object) => page_for_object(object),
                     None => Response::empty_404(),
                 }
             },
-            (GET) ["/create/atom"] => {
-                page_create_atom()
-            },
-            (POST) ["/create/atom"] => {
-                post_create_atom(request, &mut db.modify())
-            },
-            (GET) ["/{asset}", asset: String] => {
-                send_asset(&asset)
-            },
-            _ => {
-                Response::empty_404()
-            }
+            (GET) ["/create/atom"] => { page_create_atom() },
+            (POST) ["/create/atom"] => { post_create_atom(request, &mut db.modify()) },
+            (GET) ["/create/abstract"] => { page_create_abstract() },
+            (POST) ["/create/abstract"] => { post_create_abstract(request, &mut db.modify()) },
+            (GET) ["/{asset}", asset: String] => { send_asset(&asset) },
+            _ => { Response::empty_404() }
         )
     })
 }
 
+/******************************************************************************
+ * Wiki page generation.
+ * TODO page_object : remove, link_to, link_from
+ * TODO page_orphan : not linked from _wiki_main
+ * TODO create links
+ * TODO provide suggestions for atoms (fuzzy seach in atom list)
+ */
 trait ToUrl {
     fn to_url(&self) -> String;
 }
@@ -102,9 +103,14 @@ impl ToUrl for Index {
     }
 }
 
-/******************************************************************************
- * Wiki page generation.
- */
+fn title_for_object<'a>(object: ObjectRef<'a>) -> String {
+    match *object {
+        Object::Atom(ref a) => a.to_string(),
+        Object::Link(ref l) => format!("{} → {}", l.from, l.to),
+        Object::Abstract => format!("Object {}", object.index()),
+    }
+}
+
 fn wiki_page<T, C>(title: T, content: C) -> Response
 where
     T: RenderOnce,
@@ -139,14 +145,6 @@ where
         }
     };
     Response::html(template.into_string().unwrap())
-}
-
-fn title_for_object<'a>(object: ObjectRef<'a>) -> String {
-    match *object {
-        Object::Atom(ref a) => a.to_string(),
-        Object::Link(ref l) => format!("{} → {}", l.from, l.to),
-        Object::Abstract => format!("Object {}", object.index()),
-    }
 }
 
 fn main_page(graph: &Graph) -> Response {
@@ -248,6 +246,29 @@ fn post_create_atom(request: &Request, graph: &mut Graph) -> Response {
     let text = form_data.text.trim();
     let index = graph.use_atom(Atom::text(text));
     Response::redirect_303(index.to_url())
+}
+
+fn page_create_abstract() -> Response {
+    wiki_page(
+        "Create abstract",
+        html!{
+            form(method="post") {
+                : "Optional name:";
+                input(type="text", name="name");
+                input(type="submit", value="Create");
+            }
+        },
+    )
+}
+fn post_create_abstract(request: &Request, graph: &mut Graph) -> Response {
+    let form_data = try_or_400!(post_input!(request, { name: String }));
+    let name = form_data.name.trim();
+    let abstract_index = graph.create_abstract();
+    if name != "" {
+        let atom = graph.use_atom(Atom::text(name));
+        graph.use_link(Link::new(atom, abstract_index));
+    }
+    Response::redirect_303(abstract_index.to_url())
 }
 
 /* Wiki external files.
