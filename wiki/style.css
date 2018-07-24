@@ -1,5 +1,45 @@
+/* All content is in main element.
+ * Let nav float up to the upper right corner of viewport with no padding/margin.
+ * Keep padding for content.
+ */
+body {
+	margin: 0;
+}
+main {
+	margin: 0 8px;
+}
+
+/* Navigation box is vertical, stuck to the upper right corner.
+ * Encoded as an unordered list, transformed to stacked boxes.
+ */
 nav {
 	float: right;
-	border: solid grey;
+	border-bottom: 1px solid grey;
+	border-left: 1px solid grey;
+	margin: 0;
+	padding: 0;
+}
+nav ul {
+	list-style-type: none;
+	margin: 0;
+	padding: 0;
+}
+nav a {
+	text-align: center;
+	text-decoration: none;
+	display: block;
 	padding: 0.5em;
+}
+/* Stacked boxes of alternating lightly-colored backgrounds, that get stronger in hover. */
+nav a:link, nav a:visited { color: blue; }
+nav li:nth-child(even) a { background-color: #fed; }
+nav li:nth-child(even) a:hover { background-color: #fa0; }
+nav li:nth-child(odd) a { background-color: #fde; }
+nav li:nth-child(odd) a:hover { background-color: #f66; }
+
+/* TODO continue */
+h1 {
+	/* Title will be too wide on smartphones... */
+	margin-top: 0;
+	text-align: center;
 }

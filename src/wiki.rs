@@ -99,7 +99,7 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
                 }
             },
             (POST) ["/create/link"] => { post_create_link(request, &mut db.modify()) },
-            (GET) ["/{asset}", asset: String] => { send_asset(&asset) },
+            (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
             _ => { Response::empty_404() }
         )
     })
@@ -129,6 +129,7 @@ fn title_for_object<'a>(object: ObjectRef<'a>) -> String {
     }
 }
 
+// TODO add field for additional nav elements(link to/from, remove)
 fn wiki_page<T, C>(title: T, content: C) -> Response
 where
     T: RenderOnce,
@@ -137,15 +138,16 @@ where
     let navigation = [
         ("Home", "/"),
         ("All", "/all"),
-        ("New atom", "/create/atom"),
-        ("New abstract", "/create/abstract"),
-        ("Help", "/doc.html"),
+        ("Atom", "/create/atom"),
+        ("Abstract", "/create/abstract"),
+        ("Help", "/static/doc.html"), // TODO generated to have menu, or special page
     ];
     let template = html! {
         : horrorshow::helper::doctype::HTML;
         html {
             head {
-                link(rel="stylesheet", type="text/css", href="/style.css");
+                link(rel="stylesheet", type="text/css", href="/static/style.css");
+                meta(name="viewport", content="width=device-width, initial-scale=1.0");
                 title : title;
             }
             body {
@@ -158,7 +160,9 @@ where
                         }
                     }
                 }
-                : content;
+                main {
+                    : content;
+                }
             }
         }
     };
@@ -361,9 +365,11 @@ fn send_asset(path: &str) -> Response {
         let content_type = match path {
             path if path.ends_with(".css") => "text/css",
             path if path.ends_with(".html") => "text/html",
+            path if path.ends_with(".js") => "application/javascript",
+            path if path.ends_with(".ico") => "image/vnd.microsoft.icon",
             _ => "application/octet-stream",
         };
-        Response::from_data(content_type, asset).with_public_cache(3600)
+        Response::from_data(content_type, asset) //FIXME.with_public_cache(3600)
     } else {
         Response::empty_404()
     }
