@@ -69,10 +69,10 @@ enum LinkSide {
 /******************************************************************************
  * HTTP server.
  */
-pub fn run(addr: &str, file: &Path) -> ! {
+pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
     let db = database::Database::from_file(file);
     eprintln!("Wiki starting on {}", addr);
-    rouille::start_server(addr, move |request| {
+    rouille::start_server_with_pool(addr, Some(nb_threads), move |request| {
         router!(request,
             (GET) ["/"] => { main_page(&db.access()) },
             (GET) ["/all"] => { page_all_objects(&db.access()) },

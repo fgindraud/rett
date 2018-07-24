@@ -389,6 +389,14 @@ fn main() {
                     Arg::with_name("addr")
                         .help("Address on which the server will bind")
                         .default_value("localhost:8000"),
+                )
+                .arg(
+                    clap::Arg::with_name("nb_threads")
+                        .short("n")
+                        .long("nb-threads")
+                        .takes_value(true)
+                        .default_value("2")
+                        .help("Size of the threadpool"),
                 ),
         )
         .subcommand(
@@ -405,7 +413,14 @@ fn main() {
     let db_filepath = Path::new(matches.value_of_os("db_file").unwrap());
 
     match matches.subcommand() {
-        ("wiki", Some(args)) => wiki::run(args.value_of("addr").unwrap(), db_filepath),
+        ("wiki", Some(args)) => {
+            let addr = args.value_of("addr").unwrap();
+            let nb_threads = args.value_of("nb_threads")
+                .unwrap()
+                .parse()
+                .expect("nb_threads: usize");
+            wiki::run(addr, db_filepath, nb_threads)
+        }
         ("test", Some(args)) => do_test(args.value_of("what").unwrap(), db_filepath),
         _ => panic!("Missing subcommand"),
     }
