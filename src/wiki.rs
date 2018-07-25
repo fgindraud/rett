@@ -107,21 +107,23 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
 
 /******************************************************************************
  * Wiki page generation.
+ *
  * TODO page_object : remove
  * TODO page_orphan : not linked from _wiki_main
  * TODO provide suggestions for atoms (fuzzy seach in atom list)
  * TODO improve node selection system
  */
-trait ToUrl {
-    fn to_url(&self) -> String;
-}
-impl ToUrl for Index {
-    fn to_url(&self) -> String {
-        format!("/id/{}", *self)
+
+// Elements associated to a type of objects are tagged with HTML classes. Get class name.
+fn object_html_class<'a>(object: ObjectRef<'a>) -> &'static str {
+    match *object {
+        Object::Atom(_) => "atom",
+        Object::Link(_) => "link",
+        Object::Abstract => "abstract",
     }
 }
 
-fn title_for_object<'a>(object: ObjectRef<'a>) -> String {
+fn object_name<'a>(object: ObjectRef<'a>) -> String {
     match *object {
         Object::Atom(ref a) => a.to_string(),
         Object::Link(ref l) => format!("{} → {}", l.from, l.to),
@@ -129,19 +131,23 @@ fn title_for_object<'a>(object: ObjectRef<'a>) -> String {
     }
 }
 
-// TODO add field for additional nav elements(link to/from, remove)
+fn object_url(id: Index) -> String {
+    format!("/id/{}", id)
+}
+fn object_link<'a>(object: ObjectRef<'a>) -> Box<Render> {
+    let url = object_url(object.index());
+    let class = object_html_class(object);
+    let name = object_name(object);
+    box_html! {
+        a(href=&url, class=&class) : &name;
+    }
+}
+
 fn wiki_page<T, C>(title: T, content: C) -> Response
 where
     T: RenderOnce,
     C: RenderOnce,
 {
-    let navigation = [
-        ("Home", "/"),
-        ("All", "/all"),
-        ("Atom", "/create/atom"),
-        ("Abstract", "/create/abstract"),
-        ("Help", "/static/doc.html"), // TODO generated to have menu, or special page
-    ];
     let template = html! {
         : horrorshow::helper::doctype::HTML;
         html {
@@ -152,13 +158,13 @@ where
             }
             body {
                 nav {
-                    ul {
-                        @ for (name, url) in navigation.iter() {
-                            li {
-                                a(href=url) : name;
-                            }
-                        }
-                    }
+                    a(href="/") : "Home";
+                    a(href="/create/atom", class="atom") : "Atom";
+                    a(href="/create/abstract", class="abstract") : "Abstract";
+                    // TODO insert contextual link_to/from + remove
+                    a(href="/all") : "All";
+                    a(href="/static/doc.html") : "Doc";
+                    // TODO other
                 }
                 main {
                     : content;
@@ -175,7 +181,7 @@ fn main_page(graph: &Graph) -> Response {
         if let Some(&out_link_id) = wiki_main.out_links().first() {
             let out_link = graph.object(out_link_id);
             if let Object::Link(ref l) = *graph.object(out_link_id) {
-                return Response::redirect_303(l.to.to_url());
+                return Response::redirect_303(object_url(l.to));
             }
         }
     }
@@ -191,28 +197,22 @@ fn page_all_objects(graph: &Graph) -> Response {
     wiki_page(
         "Object list",
         html! {
-            h1 : "Atoms";
+            h1(class="atom") : "Atoms";
             ul {
                 @ for object in graph.objects().filter(|o| o.is_atom()) {
-                    li {
-                        a(href=object.index().to_url()) : title_for_object(object);
-                    }
+                    li : object_link(object);
                 }
             }
-            h1 : "Abstract";
+            h1(class="abstract") : "Abstract";
             ul {
                 @ for object in graph.objects().filter(|o| o.is_abstract()) {
-                    li {
-                        a(href=object.index().to_url()) : title_for_object(object);
-                    }
+                    li : object_link(object);
                 }
             }
-            h1 : "Links";
+            h1(class="link") : "Links";
             ul {
                 @ for object in graph.objects().filter(|o| o.is_link()) {
-                    li {
-                        a(href=object.index().to_url()) : title_for_object(object);
-                    }
+                    li : object_link(object);
                 }
             }
         },
@@ -221,18 +221,18 @@ fn page_all_objects(graph: &Graph) -> Response {
 
 fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
     let graph = object.graph();
-    let title = title_for_object(object);
+    let title = object_name(object);
     let details: Box<Render> = match *object {
         Object::Atom(ref a) => box_html! { : a.to_string(); },
         Object::Link(ref l) => box_html! {
             ul {
                 li {
                     : "From ";
-                    a(href=l.from.to_url()) : title_for_object(graph.object(l.from));
+                    : object_link(graph.object(l.from));
                 }
                 li {
                     : "To ";
-                    a(href=l.to.to_url()) : title_for_object(graph.object(l.to));
+                    : object_link(graph.object(l.to));
                 }
             }
         },
@@ -241,7 +241,7 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
     wiki_page(
         &title,
         html! {
-            h1 : &title;
+            h1(class=object_html_class(object)) : &title;
             p : &details;
             h2 : "Linked from";
             p {
@@ -249,9 +249,7 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
             }
             ul {
                 @ for object in object.in_links().iter().map(|i| graph.object(*i)) {
-                    li {
-                        a(href=object.index().to_url()) : title_for_object(object);
-                    }
+                    li : object_link(object);
                 }
             }
             h2 : "Links to";
@@ -260,9 +258,7 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
             }
             ul {
                 @ for object in object.out_links().iter().map(|i| graph.object(*i)) {
-                    li {
-                        a(href=object.index().to_url()) : title_for_object(object);
-                    }
+                    li : object_link(object);
                 }
             }
         },
@@ -285,7 +281,7 @@ fn post_create_atom(request: &Request, graph: &mut Graph) -> Response {
     let form_data = try_or_400!(post_input!(request, { text: String }));
     let text = form_data.text.trim();
     let index = graph.use_atom(Atom::text(text));
-    Response::redirect_303(index.to_url())
+    Response::redirect_303(object_url(index))
 }
 
 fn page_create_abstract() -> Response {
@@ -308,7 +304,7 @@ fn post_create_abstract(request: &Request, graph: &mut Graph) -> Response {
         let atom = graph.use_atom(Atom::text(name));
         graph.use_link(Link::new(atom, abstract_index));
     }
-    Response::redirect_303(abstract_index.to_url())
+    Response::redirect_303(object_url(abstract_index))
 }
 
 fn page_create_link<'a>(object: ObjectRef<'a>, link_side: LinkSide) -> Response {
@@ -325,14 +321,14 @@ fn page_create_link<'a>(object: ObjectRef<'a>, link_side: LinkSide) -> Response 
         format!(
             "Create link {} {}",
             defined_link_side_text,
-            title_for_object(object)
+            object_name(object)
         ),
         html!{
             form(method="post", action="/create/link") {
                 input(type="hidden", name=defined_link_side_text, value=object.index());
                 @ for object in graph.objects() {
                     input(type="radio", name=undefined_link_side_text, value=object.index()) {
-                        : title_for_object(object);
+                        : object_name(object);
                     }
                     br;
                 }
@@ -346,7 +342,7 @@ fn post_create_link(request: &Request, graph: &mut Graph) -> Response {
     if let (Some(_), Some(_)) = (graph.get_object(l.from), graph.get_object(l.to)) {
         // Indexes are valid TODO validate in graph
         let index = graph.use_link(Link::new(l.from, l.to));
-        Response::redirect_303(index.to_url())
+        Response::redirect_303(object_url(index))
     } else {
         Response::empty_400()
     }

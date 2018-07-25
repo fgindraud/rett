@@ -1,41 +1,43 @@
-/* All content is in main element.
- * Let nav float up to the upper right corner of viewport with no padding/margin.
- * Keep padding for content.
- */
-body {
-	margin: 0;
-}
-main {
-	margin: 0 8px;
+* {
+	box-sizing: border-box;
 }
 
-/* Navigation box is vertical, stuck to the upper right corner.
- * Encoded as an unordered list, transformed to stacked boxes.
- */
+/* Associate a colored background to each object type. */
+.atom { background-color: #9f6; }
+.link { background-color: #8df; }
+.abstract { background-color: #fa9; }
+
+/* Object links: add stronger colors on hover. */
+a.atom, a.link, a.abstract {
+	color: black;
+	text-decoration: none;
+	padding: 0 2px;
+}
+a.atom:hover, a.link:hover, a.abstract:hover { color: white; }
+a.atom:hover { background-color: #390; }
+a.link:hover { background-color: #068; }
+a.abstract:hover { background-color: #f00; }
+
+/* Let navigation box float stick to the page border. */
+body { margin: 0; }
+
+/* Navigation bar of vertically stacked boxes, stuck to the upper right side. */
 nav {
 	float: right;
-	border-bottom: 1px solid grey;
-	border-left: 1px solid grey;
-	margin: 0;
-	padding: 0;
-}
-nav ul {
-	list-style-type: none;
-	margin: 0;
-	padding: 0;
+	border: 2px solid grey;
+	border-right: none;
+	text-align: center;
 }
 nav a {
-	text-align: center;
-	text-decoration: none;
 	display: block;
-	padding: 0.5em;
+	padding: 0.5em !important; /* Force override of padding in a.object_type */
+	color: blue;
+	text-decoration: none;
+	border-top: 1px solid grey;
+	background-color: #fff;
 }
-/* Stacked boxes of alternating lightly-colored backgrounds, that get stronger in hover. */
-nav a:link, nav a:visited { color: blue; }
-nav li:nth-child(even) a { background-color: #fed; }
-nav li:nth-child(even) a:hover { background-color: #fa0; }
-nav li:nth-child(odd) a { background-color: #fde; }
-nav li:nth-child(odd) a:hover { background-color: #f66; }
+nav a:first-child { border-top: none; }
+nav a:hover { background-color: #bbb; }
 
 /* TODO continue */
 h1 {
