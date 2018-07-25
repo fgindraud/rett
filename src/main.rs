@@ -245,7 +245,7 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>>
     // Match atoms, which are unambiguous
     for pattern_object in pattern.objects() {
         if let Object::Atom(ref a) = *pattern_object {
-            if let Some(target_object_id) = target.get_atom(a) {
+            if let Some(target_object_id) = target.get_atom_index(a) {
                 mapping.add(pattern_object.index(), target_object_id);
             }
         }
@@ -303,67 +303,13 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>>
  * Test
  * TODO update with wiki conventions when defined
  */
-fn create_name_prop(g: &mut Graph) -> Index {
-    let name_entity = g.create_abstract();
-    let name_text = g.use_atom(Atom::text("name"));
-    let name_entity_description = g.use_link(Link::new(name_text, name_entity));
-    let _name_entity_description_description =
-        g.use_link(Link::new(name_entity, name_entity_description));
-    name_entity
-}
-
-fn create_named_entity(g: &mut Graph, name_entity: Index, text: &str) -> Index {
-    let entity = g.create_abstract();
-    let atom = g.use_atom(Atom::text(text));
-    let link = g.use_link(Link::new(atom, entity));
-    let _link_description = g.use_link(Link::new(name_entity, link));
-    entity
-}
-
-fn set_test_data(g: &mut Graph) {
-    let name = create_name_prop(g);
-
-    let joe = create_named_entity(g, name, "joe");
-    let bob = create_named_entity(g, name, "bob");
-
-    let pj = create_named_entity(g, name, "pj");
-    g.use_link(Link::new(pj, joe));
-    g.use_link(Link::new(pj, bob));
-
-    let fight = create_named_entity(g, name, "fight");
-    let joe_in_fight = g.use_link(Link::new(joe, fight));
-    let bob_in_fight = g.use_link(Link::new(bob, fight));
-
-    let was_present = create_named_entity(g, name, "was_present");
-    g.use_link(Link::new(was_present, joe_in_fight));
-    g.use_link(Link::new(was_present, bob_in_fight));
-
-    let win = create_named_entity(g, name, "win");
-    g.use_link(Link::new(win, bob_in_fight));
-
-    let date = create_named_entity(g, name, "date");
-    let some_date = g.use_atom(Atom::Integer(2018));
-    let fight_date = g.use_link(Link::new(some_date, fight));
-    g.use_link(Link::new(date, fight_date));
-}
-
 fn do_test(what: &str, db_filename: &Path) {
-    let mut graph = Graph::new();
-    set_test_data(&mut graph);
+    let graph = read_graph_from_file(db_filename);
 
-    if what == "serde" {
-        write_graph_to_file(db_filename, &graph)
-    }
     if what == "graph" {
         output_as_dot(&mut io::stdout(), &graph).unwrap()
     }
-    if what == "pattern" {
-        let mut pattern = Graph::new();
-        let name_prop = create_name_prop(&mut pattern);
-        let mapping = match_graph(&pattern, &graph);
-        eprintln!("MAPPING {:?}", &mapping);
-    }
-    if what == "self" {
+    if what == "self_matching" {
         // Print the matched part of graph
         let self_mapping = match_graph(&graph, &graph).expect("match failure");
         output_as_dot_filtered(&mut io::stdout(), &graph, &|i: Index| {

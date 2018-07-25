@@ -78,8 +78,8 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
             (GET) ["/all"] => { page_all_objects(&db.access()) },
             (GET) ["/id/{id}", id: Index] => {
                 match db.access ().get_object(id) {
-                    Some(object) => page_for_object(object),
-                    None => Response::empty_404(),
+                    Ok(object) => page_for_object(object),
+                    _ => Response::empty_404(),
                 }
             },
             (GET) ["/create/atom"] => { page_create_atom() },
@@ -88,14 +88,14 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
             (POST) ["/create/abstract"] => { post_create_abstract(request, &mut db.modify()) },
             (GET) ["/create/link/from/{id}", id: Index] => {
                 match db.access ().get_object(id) {
-                    Some(object) => page_create_link(object, LinkSide::From),
-                    None => Response::empty_404(),
+                    Ok(object) => page_create_link(object, LinkSide::From),
+                    _ => Response::empty_404(),
                 }
             },
             (GET) ["/create/link/to/{id}", id: Index] => {
                 match db.access ().get_object(id) {
-                    Some(object) => page_create_link(object, LinkSide::To),
-                    None => Response::empty_404(),
+                    Ok(object) => page_create_link(object, LinkSide::To),
+                    _ => Response::empty_404(),
                 }
             },
             (POST) ["/create/link"] => { post_create_link(request, &mut db.modify()) },
@@ -176,10 +176,8 @@ where
 }
 
 fn main_page(graph: &Graph) -> Response {
-    if let Some(wiki_main_index) = graph.get_atom(&Atom::text("_wiki_main")) {
-        let wiki_main = graph.object(wiki_main_index);
+    if let Some(wiki_main) = graph.get_atom(&Atom::text("_wiki_main")) {
         if let Some(&out_link_id) = wiki_main.out_links().first() {
-            let out_link = graph.object(out_link_id);
             if let Object::Link(ref l) = *graph.object(out_link_id) {
                 return Response::redirect_303(object_url(l.to));
             }
@@ -302,7 +300,7 @@ fn post_create_abstract(request: &Request, graph: &mut Graph) -> Response {
     let abstract_index = graph.create_abstract();
     if name != "" {
         let atom = graph.use_atom(Atom::text(name));
-        graph.use_link(Link::new(atom, abstract_index));
+        let _ = try_or_400!(graph.use_link(Link::new(atom, abstract_index)));
     }
     Response::redirect_303(object_url(abstract_index))
 }
@@ -339,13 +337,8 @@ fn page_create_link<'a>(object: ObjectRef<'a>, link_side: LinkSide) -> Response 
 }
 fn post_create_link(request: &Request, graph: &mut Graph) -> Response {
     let l = try_or_400!(post_input!(request, { from: Index, to: Index }));
-    if let (Some(_), Some(_)) = (graph.get_object(l.from), graph.get_object(l.to)) {
-        // Indexes are valid TODO validate in graph
-        let index = graph.use_link(Link::new(l.from, l.to));
-        Response::redirect_303(object_url(index))
-    } else {
-        Response::empty_400()
-    }
+    let index = try_or_400!(graph.use_link(Link::new(l.from, l.to)));
+    Response::redirect_303(object_url(index))
 }
 
 /* Wiki external files.

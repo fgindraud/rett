@@ -1,11 +1,29 @@
 use super::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::convert::AsRef;
+use std::error;
 use std::fmt;
 use std::ops::Deref;
 
 // TODO remove / update elements semantics
 // TODO pattern matching as needed for the wiki output
+
+/// Index for graph elements.
+pub type Index = usize;
+
+/// Graph operation errors.
+#[derive(Debug)]
+pub enum Error {
+    InvalidIndex,
+}
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Error::InvalidIndex => "invalid index".fmt(f),
+        }
+    }
+}
+impl error::Error for Error {}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize)]
 pub enum Atom {
@@ -25,9 +43,6 @@ impl fmt::Display for Atom {
         }
     }
 }
-
-/// Index for graph elements.
-pub type Index = usize;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct Link {
@@ -98,7 +113,6 @@ pub struct Graph {
 }
 
 impl Graph {
-    /// Create a new empty graph.
     pub fn new() -> Self {
         Graph {
             objects: Vec::new(),
@@ -107,20 +121,21 @@ impl Graph {
         }
     }
 
-    /// Get object, index may be invalid
-    pub fn get_object<'a>(&'a self, index: Index) -> Option<ObjectRef<'a>> {
+    pub fn valid(&self, index: Index) -> bool {
+        index < self.objects.len() && self.objects[index].is_some()
+    }
+    pub fn get_object<'a>(&'a self, index: Index) -> Result<ObjectRef<'a>, Error> {
         match self.objects.get(index) {
-            Some(&Some(ref object_data)) => Some(ObjectRef {
+            Some(&Some(ref object_data)) => Ok(ObjectRef {
                 index: index,
                 object_data: object_data,
                 graph: self,
             }),
-            _ => None,
+            _ => Err(Error::InvalidIndex),
         }
     }
-    /// Get object, assume valid index
     pub fn object<'a>(&'a self, index: Index) -> ObjectRef<'a> {
-        self.get_object(index).expect("invalid index")
+        self.get_object(index).unwrap()
     }
 
     /// Iterate on valid objects
@@ -131,18 +146,22 @@ impl Graph {
         }
     }
 
-    /// Get index of an atom, or None if not found.
-    pub fn get_atom(&self, atom: &Atom) -> Option<Index> {
+    pub fn get_atom_index(&self, atom: &Atom) -> Option<Index> {
         self.atom_indexes.get(&atom).cloned()
     }
-    /// Get index of a link, or None if not found.
-    pub fn get_link(&self, link: &Link) -> Option<Index> {
+    pub fn get_link_index(&self, link: &Link) -> Option<Index> {
         self.link_indexes.get(&link).cloned()
+    }
+    pub fn get_atom<'a>(&'a self, atom: &Atom) -> Option<ObjectRef<'a>> {
+        self.get_atom_index(atom).map(|i| self.object(i))
+    }
+    pub fn get_link<'a>(&'a self, link: &Link) -> Option<ObjectRef<'a>> {
+        self.get_link_index(link).map(|i| self.object(i))
     }
 
     /// Get the index of an atom, inserting it if not found.
     pub fn use_atom(&mut self, atom: Atom) -> Index {
-        match self.get_atom(&atom) {
+        match self.get_atom_index(&atom) {
             Some(index) => index,
             None => {
                 let new_index = self.insert_object(Object::Atom(atom.clone()));
@@ -152,14 +171,18 @@ impl Graph {
         }
     }
     /// Get the index of an atom, inserting it if not found.
-    pub fn use_link(&mut self, link: Link) -> Index {
-        match self.get_link(&link) {
-            Some(index) => index,
-            None => {
-                let new_index = self.insert_object(Object::Link(link.clone()));
-                self.register_link(new_index, link);
-                new_index
+    pub fn use_link(&mut self, link: Link) -> Result<Index, Error> {
+        if self.valid(link.from) && self.valid(link.to) {
+            match self.get_link_index(&link) {
+                Some(index) => Ok(index),
+                None => {
+                    let new_index = self.insert_object(Object::Link(link.clone()));
+                    self.register_link(new_index, link);
+                    Ok(new_index)
+                }
             }
+        } else {
+            Err(Error::InvalidIndex)
         }
     }
     /// Create a new abstract object, return its index.
@@ -181,16 +204,17 @@ impl Graph {
         self.objects.push(Some(ObjectData::new(object)));
         index
     }
-    fn object_mut(&mut self, index: Index) -> &mut ObjectData {
-        self.objects[index].as_mut().expect("Invalid index")
-    }
     fn register_atom(&mut self, index: Index, atom: Atom) {
         let old = self.atom_indexes.insert(atom, index);
         assert_eq!(old, None);
     }
     fn register_link(&mut self, index: Index, link: Link) {
-        self.object_mut(link.from).out_links.push(index);
-        self.object_mut(link.to).in_links.push(index);
+        self.objects[link.from]
+            .as_mut()
+            .unwrap()
+            .out_links
+            .push(index);
+        self.objects[link.to].as_mut().unwrap().in_links.push(index);
         let old = self.link_indexes.insert(link, index);
         assert_eq!(old, None);
     }
@@ -271,7 +295,7 @@ impl<'a> Iterator for OrderedObjectIterator<'a> {
                 return None;
             };
             self.next_index = current_index + 1;
-            if let Some(object_ref) = self.graph.get_object(current_index) {
+            if let Ok(object_ref) = self.graph.get_object(current_index) {
                 return Some(object_ref);
             }
         }
