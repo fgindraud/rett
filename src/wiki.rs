@@ -178,8 +178,8 @@ where
 
 fn main_page(graph: &Graph) -> Response {
     if let Some(wiki_main) = graph.get_atom(&Atom::text("_wiki_main")) {
-        if let Some(&out_link_id) = wiki_main.out_links().first() {
-            if let Object::Link(ref l) = *graph.object(out_link_id) {
+        if let Some(out_link) = wiki_main.out_links().first() {
+            if let Object::Link(ref l) = *out_link {
                 return Response::redirect_303(object_url(l.to));
             }
         }
@@ -250,13 +250,13 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
             p : &details;
             h2 : "Linked from";
             ul {
-                @ for object in object.in_links().iter().map(|i| graph.object(*i)) {
+                @ for object in object.in_links() {
                     li : object_link(object);
                 }
             }
             h2 : "Links to";
             ul {
-                @ for object in object.out_links().iter().map(|i| graph.object(*i)) {
+                @ for object in object.out_links() {
                     li : object_link(object);
                 }
             }

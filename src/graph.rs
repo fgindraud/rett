@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::convert::AsRef;
 use std::error;
 use std::fmt;
-use std::ops::Deref;
+use std::ops;
 
 // TODO remove / update elements semantics
 // TODO pattern matching as needed for the wiki output
@@ -234,11 +234,23 @@ impl<'a> ObjectRef<'a> {
     pub fn graph(&self) -> &Graph {
         &self.graph
     }
-    pub fn in_links(&self) -> &'a Vec<Index> {
+    pub fn in_links_index(&self) -> &[Index] {
         &self.object_data.in_links
     }
-    pub fn out_links(&self) -> &'a Vec<Index> {
+    pub fn out_links_index(&self) -> &[Index] {
         &self.object_data.out_links
+    }
+    pub fn in_links(&self) -> ObjectRefSlice<'a> {
+        ObjectRefSlice {
+            indexes: &self.object_data.in_links,
+            graph: self.graph,
+        }
+    }
+    pub fn out_links(&self) -> ObjectRefSlice<'a> {
+        ObjectRefSlice {
+            indexes: &self.object_data.out_links,
+            graph: self.graph,
+        }
     }
 }
 impl<'a> AsRef<Object> for ObjectRef<'a> {
@@ -246,7 +258,7 @@ impl<'a> AsRef<Object> for ObjectRef<'a> {
         &self.object_data.object
     }
 }
-impl<'a> Deref for ObjectRef<'a> {
+impl<'a> ops::Deref for ObjectRef<'a> {
     type Target = Object;
     fn deref(&self) -> &Object {
         &self.object_data.object
@@ -298,6 +310,52 @@ impl<'a> Iterator for OrderedObjectIterator<'a> {
             if let Ok(object_ref) = self.graph.get_object(current_index) {
                 return Some(object_ref);
             }
+        }
+    }
+}
+
+/// Slice of object refs (wraps a slice of indexes).
+#[derive(Clone, Copy)]
+pub struct ObjectRefSlice<'a> {
+    indexes: &'a [Index],
+    graph: &'a Graph,
+}
+impl<'a> ObjectRefSlice<'a> {
+    pub fn len(&self) -> usize {
+        self.indexes.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.indexes.is_empty()
+    }
+    pub fn at(&self, i: usize) -> ObjectRef<'a> {
+        self.graph.object(self.indexes[i])
+    }
+    pub fn first(&self) -> Option<ObjectRef<'a>> {
+        self.indexes.first().map(|&i| self.graph.object(i))
+    }
+}
+
+/// Iteration capability for object ref slice.
+impl<'a> IntoIterator for ObjectRefSlice<'a> {
+    type Item = ObjectRef<'a>;
+    type IntoIter = ObjectRefSliceIterator<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        ObjectRefSliceIterator { i: 0, slice: self }
+    }
+}
+pub struct ObjectRefSliceIterator<'a> {
+    i: usize,
+    slice: ObjectRefSlice<'a>,
+}
+impl<'a> Iterator for ObjectRefSliceIterator<'a> {
+    type Item = ObjectRef<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.i;
+        if i < self.slice.len() {
+            self.i += 1;
+            Some(self.slice.at(i))
+        } else {
+            None
         }
     }
 }

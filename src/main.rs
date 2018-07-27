@@ -124,11 +124,11 @@ fn output_as_dot_filtered(
                         };
                         // Conflicts with links that are pointing to/from us
                         object
-                            .in_links()
+                            .in_links_index()
                             .iter()
                             .for_each(&mut conflict_with_color_of_link);
                         object
-                            .out_links()
+                            .out_links_index()
                             .iter()
                             .for_each(&mut conflict_with_color_of_link);
                     }
@@ -263,8 +263,8 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>>
             && matched_target_object.in_links().len() == 1
         {
             if !mapping.add(
-                matched_pattern_object.in_links()[0],
-                matched_target_object.in_links()[0],
+                matched_pattern_object.in_links_index()[0],
+                matched_target_object.in_links_index()[0],
             ) {
                 return None;
             }
@@ -273,8 +273,8 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>>
             && matched_target_object.out_links().len() == 1
         {
             if !mapping.add(
-                matched_pattern_object.out_links()[0],
-                matched_target_object.out_links()[0],
+                matched_pattern_object.out_links_index()[0],
+                matched_target_object.out_links_index()[0],
             ) {
                 return None;
             }
