@@ -143,9 +143,10 @@ fn object_link<'a>(object: ObjectRef<'a>) -> Box<Render> {
     }
 }
 
-fn wiki_page<T, C>(title: T, content: C) -> Response
+fn wiki_page<T, N, C>(title: T, additional_nav_links: N, content: C) -> Response
 where
     T: RenderOnce,
+    N: RenderOnce,
     C: RenderOnce,
 {
     let template = html! {
@@ -161,7 +162,7 @@ where
                     a(href="/") : "Home";
                     a(href="/create/atom", class="atom") : "Atom";
                     a(href="/create/abstract", class="abstract") : "Abstract";
-                    // TODO insert contextual link_to/from + remove
+                    : additional_nav_links;
                     a(href="/all") : "All";
                     a(href="/static/doc.html") : "Doc";
                     // TODO other
@@ -185,6 +186,7 @@ fn main_page(graph: &Graph) -> Response {
     }
     wiki_page(
         "Main page",
+        html!{},
         html! {
             p : "Create a link from \"_wiki_main\" to a graph object to define it as the home page.";
         },
@@ -194,6 +196,7 @@ fn main_page(graph: &Graph) -> Response {
 fn page_all_objects(graph: &Graph) -> Response {
     wiki_page(
         "Object list",
+        html!{},
         html! {
             h1(class="atom") : "Atoms";
             ul {
@@ -239,21 +242,19 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
     wiki_page(
         &title,
         html! {
+            a(href=format!("/create/link/to/{}", object.index()), class="link") : "Link to";
+            a(href=format!("/create/link/from/{}", object.index()), class="link") : "Link from";
+        },
+        html! {
             h1(class=object_html_class(object)) : &title;
             p : &details;
             h2 : "Linked from";
-            p {
-                a(href=format!("/create/link/to/{}", object.index())) : "Add";
-            }
             ul {
                 @ for object in object.in_links().iter().map(|i| graph.object(*i)) {
                     li : object_link(object);
                 }
             }
             h2 : "Links to";
-            p {
-                a(href=format!("/create/link/from/{}", object.index())) : "Add";
-            }
             ul {
                 @ for object in object.out_links().iter().map(|i| graph.object(*i)) {
                     li : object_link(object);
@@ -266,6 +267,7 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
 fn page_create_atom() -> Response {
     wiki_page(
         "Create atom",
+        html!{},
         html!{
             form(method="post") {
                 : "Value:";
@@ -285,6 +287,7 @@ fn post_create_atom(request: &Request, graph: &mut Graph) -> Response {
 fn page_create_abstract() -> Response {
     wiki_page(
         "Create abstract",
+        html!{},
         html!{
             form(method="post") {
                 : "Optional name:";
@@ -315,13 +318,17 @@ fn page_create_link<'a>(object: ObjectRef<'a>, link_side: LinkSide) -> Response 
         LinkSide::To => "from",
     };
     let graph = object.graph();
+    let name = object_name(object);
+    let class = object_html_class(object);
+    let url = object_url(object.index());
     wiki_page(
-        format!(
-            "Create link {} {}",
-            defined_link_side_text,
-            object_name(object)
-        ),
+        format!("Create link {} {}", defined_link_side_text, name),
+        html!{},
         html!{
+            p {
+                : format!("Create link {} ", defined_link_side_text);
+                a(href=url, class=class) : name;
+            }
             form(method="post", action="/create/link") {
                 input(type="hidden", name=defined_link_side_text, value=object.index());
                 @ for object in graph.objects() {

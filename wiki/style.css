@@ -3,9 +3,9 @@
 }
 
 /* Associate a colored background to each object type. */
-.atom { background-color: #9f6; }
-.link { background-color: #8df; }
-.abstract { background-color: #fa9; }
+.atom { background-color: #bfa; }
+.link { background-color: #ccf; }
+.abstract { background-color: #fcb; }
 
 /* Object links: add stronger colors on hover. */
 a.atom, a.link, a.abstract {
@@ -16,7 +16,7 @@ a.atom, a.link, a.abstract {
 a.atom:hover, a.link:hover, a.abstract:hover { color: white; }
 a.atom:hover { background-color: #390; }
 a.link:hover { background-color: #068; }
-a.abstract:hover { background-color: #f00; }
+a.abstract:hover { background-color: #c00; }
 
 /* Let navigation box float stick to the page border. */
 body { margin: 0; }
