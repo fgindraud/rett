@@ -382,16 +382,16 @@ mod tests {
         let mut graph = Graph::new();
         let i0 = graph.create_abstract();
         let i1 = graph.use_atom(Atom::text("Abstract"));
-        let i2 = graph.use_link(Link::new(i1, i0));
-        let _i3 = graph.use_link(Link::new(i0, i2));
+        let i2 = graph.use_link(Link::new(i1, i0)).unwrap();
+        let _i3 = graph.use_link(Link::new(i0, i2)).unwrap();
         // Serialize and deserialize
         let serialized = serde_json::to_string(&graph).expect("Serialization failure");
         let deserialized: Graph =
             serde_json::from_str(&serialized).expect("Deserialization failure");
         // Compare
-        for object_ref in graph.objects() {
-            let deserialized_object_ref = deserialized.object(object_ref.index());
-            assert_eq!(object_ref.object(), deserialized_object_ref.object());
+        for object in graph.objects() {
+            let deserialized_object = deserialized.object(object.index());
+            assert_eq!(*object, *deserialized_object);
         }
     }
 }
