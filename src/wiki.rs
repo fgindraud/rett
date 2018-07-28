@@ -57,7 +57,7 @@ mod database {
 }
 
 use graph::{Atom, Graph, Index, Link, Object, ObjectRef};
-use horrorshow::{self, Render, RenderOnce, Template, TemplateBuffer};
+use horrorshow::{self, Render, RenderOnce, Template};
 use rouille::{self, Request, Response};
 use std::path::Path;
 
@@ -102,8 +102,9 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
                 }
             },
             (POST) ["/create/link"] => { post_create_link(request, &mut db.modify()) },
-            // Edit description
+            // Contextual actions from overlays
             (POST) ["/edit/description"] => { post_edit_description(request, &mut db.modify()) },
+            (POST) ["/remove"] => { post_remove(request, &mut db.modify()) },
             // Assets
             (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
             _ => { Response::empty_404() }
@@ -114,7 +115,6 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
 /******************************************************************************
  * Wiki page generation.
  *
- * TODO page_object : remove
  * TODO page_orphan : not linked from _wiki_main
  * TODO provide suggestions for atoms (fuzzy seach in atom list)
  * TODO improve node selection system
@@ -151,17 +151,22 @@ fn object_link<'a>(object: ObjectRef<'a>) -> Box<Render> {
 
 fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
     let graph = object.graph();
-    let title = object_name(object);
+    let name = object_name(object);
 
     let nav = html! {
         a(href=format!("/create/link/to/{}", object.index()), class="link") : "Link to";
         a(href=format!("/create/link/from/{}", object.index()), class="link") : "Link from";
         a(id="edit_description_start") : "Description";
+        @ if object.in_links().is_empty() && object.out_links().is_empty() {
+            a(id="remove_start") : "Remove";
+        }
     };
     let description = html! {
         @ for paragraph in object.description().split("\n\n") {
             p(class="description") : paragraph;
         }
+    };
+    let overlays = html! {
         div(id="edit_description_overlay", class="overlay") {
             form(class="vbox", method="post", action="/edit/description") {
                 input(type="hidden", name="index", value=object.index());
@@ -172,9 +177,19 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
                 }
             }
         }
+        div(id="remove_overlay", class="overlay") {
+            form(class="vbox", method="post", action="/remove") {
+                input(type="hidden", name="index", value=object.index());
+                h1 : format!("Remove {} ?", name);
+                div(class="hbox") {
+                    a(class="button", id="remove_cancel") : "Cancel";
+                    input(class="button", type="submit", value="Remove");
+                }
+            }
+        }
     };
     let content = html! {
-        h1(class=object_html_class(object)) : &title;
+        h1(class=object_html_class(object)) : &name;
         : description;
         @ if let Object::Link(ref l) = *object {
             ul {
@@ -200,8 +215,9 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
                 li : object_link(object);
             }
         }
+        : overlays;
     };
-    wiki_page(&title, nav, content)
+    wiki_page(&name, nav, content)
 }
 
 fn main_page(graph: &Graph) -> Response {
@@ -324,6 +340,11 @@ fn post_edit_description(request: &Request, graph: &mut Graph) -> Response {
     form_data.content.retain(|c| c != '\r');
     let _ = try_or_400!(graph.set_description(form_data.index, form_data.content));
     Response::redirect_303(object_url(form_data.index))
+}
+fn post_remove(request: &Request, graph: &mut Graph) -> Response {
+    let form_data = try_or_400!(post_input!(request, { index: Index }));
+    let _ = try_or_400!(graph.remove_object(form_data.index));
+    Response::redirect_303("/")
 }
 
 // Page template

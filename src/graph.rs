@@ -1,12 +1,9 @@
 use super::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::convert::AsRef;
-use std::error;
-use std::fmt;
-use std::ops;
+use std::{error, fmt, mem, ops};
 
-// TODO remove / update elements semantics
-// TODO pattern matching as needed for the wiki output
+// TODO update / rename elements semantics
 
 /// Index for graph elements.
 pub type Index = usize;
@@ -15,11 +12,13 @@ pub type Index = usize;
 #[derive(Debug)]
 pub enum Error {
     InvalidIndex,
+    CannotRemoveLinked,
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Error::InvalidIndex => "invalid index".fmt(f),
+            Error::CannotRemoveLinked => "cannot remove a referenced object".fmt(f),
         }
     }
 }
@@ -205,8 +204,29 @@ impl Graph {
     }
 
     /// Delete object
-    fn remove_object(&mut self, index: Index) -> Result<(), Error> {
-        unimplemented!() //TODO
+    pub fn remove_object(&mut self, index: Index) -> Result<(), Error> {
+        {
+            // Filter: valid objects which are not linked
+            let object = self.get_object(index)?;
+            if object.is_link() && !(object.in_links().is_empty() && object.out_links().is_empty())
+            {
+                return Err(Error::CannotRemoveLinked);
+            }
+        }
+        let object_data = mem::replace(&mut self.objects[index], None).unwrap();
+        match object_data.object {
+            Object::Atom(ref a) => {
+                self.atom_indexes.remove_entry(a);
+            }
+            Object::Link(ref l) => {
+                self.link_indexes.remove_entry(l);
+                let p = |i: &Index| *i != index;
+                self.objects[l.from].as_mut().unwrap().out_links.retain(p);
+                self.objects[l.to].as_mut().unwrap().in_links.retain(p);
+            }
+            Object::Abstract => (),
+        }
+        Ok(())
     }
 
     fn insert_object(&mut self, object: Object) -> Index {
