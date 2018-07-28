@@ -89,17 +89,22 @@ pub enum Object {
 /** Data for each graph object.
  * In addition to the object, store local topology for fast traversal.
  * in_links/out_links: indexes of links pointing to/from this link.
- * TODO Vec<String> notes that are not part of topology ?
+ * Description: raw text field that is not part of topology.
  */
+#[derive(Serialize, Deserialize)]
 struct ObjectData {
     object: Object,
+    description: String,
+    #[serde(skip)]
     in_links: Vec<Index>,
+    #[serde(skip)]
     out_links: Vec<Index>,
 }
 impl ObjectData {
     fn new(object: Object) -> Self {
         ObjectData {
             object: object,
+            description: String::new(),
             in_links: Vec::new(),
             out_links: Vec::new(),
         }
@@ -159,6 +164,15 @@ impl Graph {
         self.get_link_index(link).map(|i| self.object(i))
     }
 
+    pub fn set_description(&mut self, index: Index, text: String) -> Result<(), Error> {
+        if self.valid(index) {
+            self.objects[index].as_mut().unwrap().description = text;
+            Ok(())
+        } else {
+            Err(Error::InvalidIndex)
+        }
+    }
+
     /// Get the index of an atom, inserting it if not found.
     pub fn use_atom(&mut self, atom: Atom) -> Index {
         match self.get_atom_index(&atom) {
@@ -188,6 +202,11 @@ impl Graph {
     /// Create a new abstract object, return its index.
     pub fn create_abstract(&mut self) -> Index {
         self.insert_object(Object::Abstract)
+    }
+
+    /// Delete object
+    fn remove_object(&mut self, index: Index) -> Result<(), Error> {
+        unimplemented!() //TODO
     }
 
     fn insert_object(&mut self, object: Object) -> Index {
@@ -233,6 +252,9 @@ impl<'a> ObjectRef<'a> {
     }
     pub fn graph(&self) -> &Graph {
         &self.graph
+    }
+    pub fn description(&self) -> &str {
+        &self.object_data.description
     }
     pub fn in_links_index(&self) -> &[Index] {
         &self.object_data.in_links
@@ -362,55 +384,42 @@ impl<'a> Iterator for ObjectRefSliceIterator<'a> {
 
 /******************************************************************************
  * IO using serde.
- * The graph is serialized as a sequence of Option<Object>.
+ * The graph is serialized as a sequence of Option<ObjectData>.
+ * ObjectData only contains object and description when serialized.
  * Atoms, topology and indexes are conserved.
  */
 impl Serialize for Graph {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeSeq;
-        let mut seq = serializer.serialize_seq(Some(self.objects.len()))?;
-        for cell in &self.objects {
-            seq.serialize_element(&cell.as_ref().map(|obj_data| &obj_data.object))?;
-        }
-        seq.end()
+        self.objects.serialize(serializer)
     }
 }
 
 impl<'d> Deserialize<'d> for Graph {
     fn deserialize<D: Deserializer<'d>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::{SeqAccess, Visitor};
-        use std::fmt;
+        let mut graph = Graph::new();
+        graph.objects = Vec::<Option<ObjectData>>::deserialize(deserializer)?;
 
-        // Define a Visitor tag for our case, and pass it to deserializer.
-        struct GraphVisitor;
-        impl<'s> Visitor<'s> for GraphVisitor {
-            type Value = Graph;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("graph::Graph")
-            }
-
-            fn visit_seq<S: SeqAccess<'s>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
-                let mut graph = Graph::new();
-                // Fill graph with raw objects
-                while let Some(cell) = seq.next_element::<Option<Object>>()? {
-                    graph.objects.push(cell.map(|obj| ObjectData::new(obj)))
-                }
-                // Now that all objects are defined, restore ObjectData.
-                for index in 0..graph.objects.len() {
-                    let maybe_object: Option<Object> = graph.objects[index]
-                        .as_ref()
-                        .map(|obj_data| obj_data.object.clone());
-                    match maybe_object {
-                        Some(Object::Atom(atom)) => graph.register_atom(index, atom),
-                        Some(Object::Link(link)) => graph.register_link(index, link),
-                        _ => (),
+        // Restore in_links/out_links, maps, and validate
+        for index in 0..graph.objects.len() {
+            let maybe_object: Option<Object> = graph.objects[index]
+                .as_ref()
+                .map(|obj_data| obj_data.object.clone());
+            match maybe_object {
+                Some(Object::Atom(atom)) => graph.register_atom(index, atom),
+                Some(Object::Link(link)) => {
+                    if !(graph.valid(link.from) && graph.valid(link.to)) {
+                        use serde::de::Error;
+                        return Err(D::Error::custom(format!(
+                            "link at index {} holds an invalid graph index",
+                            index
+                        )));
                     }
+                    graph.register_link(index, link)
                 }
-                Ok(graph)
+                _ => (),
             }
         }
-        deserializer.deserialize_seq(GraphVisitor)
+        Ok(graph)
     }
 }
 

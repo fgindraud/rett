@@ -306,6 +306,9 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>>
 fn do_test(what: &str, db_filename: &Path) {
     let graph = read_graph_from_file(db_filename);
 
+    if what == "serde" {
+        write_graph_to_file(Path::new("serde_out"), &graph);
+    }
     if what == "graph" {
         output_as_dot(&mut io::stdout(), &graph).unwrap()
     }
@@ -345,13 +348,13 @@ fn main() {
                         .help("Size of the threadpool"),
                 ),
         )
-        .subcommand(
-            SubCommand::with_name("test").about("Run tests").arg(
-                Arg::with_name("what")
-                    .required(true)
-                    .possible_values(&["serde", "graph", "pattern", "self"]),
-            ),
-        )
+        .subcommand(SubCommand::with_name("test").about("Run tests").arg(
+            Arg::with_name("what").required(true).possible_values(&[
+                "serde",
+                "graph",
+                "self_matching",
+            ]),
+        ))
         .get_matches();
 
     // TODO useful tooling: merge of files
