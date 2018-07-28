@@ -19,7 +19,9 @@ a.link:hover { background-color: #068; }
 a.abstract:hover { background-color: #c00; }
 
 /* Let navigation box float stick to the page border. */
-body { margin: 0; }
+body {
+	margin: 0;
+}
 
 /* Navigation bar of vertically stacked boxes, stuck to the upper right side. */
 nav {
@@ -39,9 +41,68 @@ nav a {
 nav a:first-child { border-top: none; }
 nav a:hover { background-color: #bbb; }
 
+/* Define as overlay: over the screen. Suitable for hbox/vbox. */
+.overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	height: 100%;
+	width: 100%;
+	padding: 5px;
+	background-color: white;
+}
+
+/* vertical/horizontal containers, with scaling */
+.vbox, .hbox {
+	display: flex;
+	align-items: stretch;
+	justify-content: space-between;
+}
+.vbox > .hbox, .hbox > .vbox, .vbox > .button, .hbox > .button {
+	flex-grow: 1;
+}
+.vbox {
+	height: 100%;
+	flex-direction: column;
+}
+.vbox > * { margin-top: 5px; }
+.vbox > *:first-child { margin-top: 0; }
+.hbox { flex-direction: row; }
+.hbox > * { margin-left: 5px; }
+.hbox > *:first-child { margin-left: 0; }
+
+/* Button objects for use in containers. */
+.button {
+	background-color: #eee;
+	color: blue;
+	font-family: monospace;
+	font-size: 1em;
+}
+.button:hover {
+	background-color: #ccc;
+}
+a.button {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	text-decoration: none;
+}
+input.button {
+	display: block;
+	border: none;
+	text-decoration: none;
+	padding: 0;
+}
+
 /* TODO continue */
 h1 {
 	/* Title will be too wide on smartphones... */
 	margin-top: 0;
 	text-align: center;
+}
+
+/* Content specific rules */
+#edit_description_content {
+	resize: none;
+	height: 80%;
 }

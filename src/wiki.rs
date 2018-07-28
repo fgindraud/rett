@@ -74,14 +74,17 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
     eprintln!("Wiki starting on {}", addr);
     rouille::start_server_with_pool(addr, Some(nb_threads), move |request| {
         router!(request,
+            // Main page and special pages
             (GET) ["/"] => { main_page(&db.access()) },
             (GET) ["/all"] => { page_all_objects(&db.access()) },
+            // Object by id
             (GET) ["/id/{id}", id: Index] => {
                 match db.access ().get_object(id) {
                     Ok(object) => page_for_object(object),
                     _ => Response::empty_404(),
                 }
             },
+            // Create elements (raw)
             (GET) ["/create/atom"] => { page_create_atom() },
             (POST) ["/create/atom"] => { post_create_atom(request, &mut db.modify()) },
             (GET) ["/create/abstract"] => { page_create_abstract() },
@@ -89,16 +92,19 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
             (GET) ["/create/link/from/{id}", id: Index] => {
                 match db.access ().get_object(id) {
                     Ok(object) => page_create_link(object, LinkSide::From),
-                    _ => Response::empty_404(),
+                    _ => Response::empty_400(),
                 }
             },
             (GET) ["/create/link/to/{id}", id: Index] => {
                 match db.access ().get_object(id) {
                     Ok(object) => page_create_link(object, LinkSide::To),
-                    _ => Response::empty_404(),
+                    _ => Response::empty_400(),
                 }
             },
             (POST) ["/create/link"] => { post_create_link(request, &mut db.modify()) },
+            // Edit description
+            (POST) ["/edit/description"] => { post_edit_description(request, &mut db.modify()) },
+            // Assets
             (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
             _ => { Response::empty_404() }
         )
@@ -150,10 +156,21 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
     let nav = html! {
         a(href=format!("/create/link/to/{}", object.index()), class="link") : "Link to";
         a(href=format!("/create/link/from/{}", object.index()), class="link") : "Link from";
+        a(id="edit_description_start") : "Description";
     };
     let description = html! {
         @ for paragraph in object.description().split("\n\n") {
             p(class="description") : paragraph;
+        }
+        div(id="edit_description_overlay", class="overlay") {
+            form(class="vbox", method="post", action="/edit/description") {
+                input(type="hidden", name="index", value=object.index());
+                textarea(id="edit_description_content", name="content", autofocus, placeholder="Description...") : object.description();
+                div(class="hbox") {
+                    a(class="button", id="edit_description_cancel") : "Cancel";
+                    input(class="button", type="submit", value="Edit");
+                }
+            }
         }
     };
     let content = html! {
@@ -302,6 +319,13 @@ fn post_create_link(request: &Request, graph: &mut Graph) -> Response {
     Response::redirect_303(object_url(index))
 }
 
+fn post_edit_description(request: &Request, graph: &mut Graph) -> Response {
+    let mut form_data = try_or_400!(post_input!(request, { index: Index, content: String}));
+    form_data.content.retain(|c| c != '\r');
+    let _ = try_or_400!(graph.set_description(form_data.index, form_data.content));
+    Response::redirect_303(object_url(form_data.index))
+}
+
 // Page template
 fn wiki_page<T, N, C>(title: T, additional_nav_links: N, content: C) -> Response
 where
@@ -314,6 +338,7 @@ where
         html {
             head {
                 link(rel="stylesheet", type="text/css", href="/static/style.css");
+                script(src="/static/jquery.js") {}
                 meta(name="viewport", content="width=device-width, initial-scale=1.0");
                 title : title;
             }
@@ -330,6 +355,7 @@ where
                 main {
                     : content;
                 }
+                script(src="/static/client.js") {}
             }
         }
     };
