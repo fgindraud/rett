@@ -57,7 +57,7 @@ mod database {
 }
 
 use graph::{Atom, Graph, Index, Link, Object, ObjectRef};
-use horrorshow::{self, Render, RenderOnce, Template};
+use horrorshow::{self, Render, RenderOnce, Template, TemplateBuffer};
 use rouille::{self, Request, Response};
 use std::path::Path;
 
@@ -143,6 +143,166 @@ fn object_link<'a>(object: ObjectRef<'a>) -> Box<Render> {
     }
 }
 
+fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
+    let graph = object.graph();
+    let title = object_name(object);
+
+    let nav = html! {
+        a(href=format!("/create/link/to/{}", object.index()), class="link") : "Link to";
+        a(href=format!("/create/link/from/{}", object.index()), class="link") : "Link from";
+    };
+    let description = html! {
+        @ for paragraph in object.description().split("\n\n") {
+            p(class="description") : paragraph;
+        }
+    };
+    let content = html! {
+        h1(class=object_html_class(object)) : &title;
+        : description;
+        @ if let Object::Link(ref l) = *object {
+            ul {
+                li {
+                    : "From ";
+                    : object_link(graph.object(l.from));
+                }
+                li {
+                    : "To ";
+                    : object_link(graph.object(l.to));
+                }
+            }
+        }
+        h2 : "Linked from";
+        ul {
+            @ for object in object.in_links() {
+                li : object_link(object);
+            }
+        }
+        h2 : "Links to";
+        ul {
+            @ for object in object.out_links() {
+                li : object_link(object);
+            }
+        }
+    };
+    wiki_page(&title, nav, content)
+}
+
+fn main_page(graph: &Graph) -> Response {
+    if let Some(wiki_main) = graph.get_atom(&Atom::text("_wiki_main")) {
+        if let Some(out_link) = wiki_main.out_links().first() {
+            if let Object::Link(ref l) = *out_link {
+                return Response::redirect_303(object_url(l.to));
+            }
+        }
+    }
+    let content = html! {
+        p : "Create a link from \"_wiki_main\" to a graph object to define it as the home page.";
+    };
+    wiki_page("Main page", html!{}, content)
+}
+
+fn page_all_objects(graph: &Graph) -> Response {
+    let content = html! {
+        h1(class="atom") : "Atoms";
+        ul {
+            @ for object in graph.objects().filter(|o| o.is_atom()) {
+                li : object_link(object);
+            }
+        }
+        h1(class="abstract") : "Abstract";
+        ul {
+            @ for object in graph.objects().filter(|o| o.is_abstract()) {
+                li : object_link(object);
+            }
+        }
+        h1(class="link") : "Links";
+        ul {
+            @ for object in graph.objects().filter(|o| o.is_link()) {
+                li : object_link(object);
+            }
+        }
+    };
+    wiki_page("Object list", html!{}, content)
+}
+
+fn page_create_atom() -> Response {
+    let content = html! {
+        form(method="post") {
+            : "Value:";
+            input(type="text", name="text");
+            input(type="submit", value="Create");
+        }
+    };
+    wiki_page("Create atom", html!{}, content)
+}
+fn post_create_atom(request: &Request, graph: &mut Graph) -> Response {
+    let form_data = try_or_400!(post_input!(request, { text: String }));
+    let text = form_data.text.trim();
+    let index = graph.use_atom(Atom::text(text));
+    Response::redirect_303(object_url(index))
+}
+
+fn page_create_abstract() -> Response {
+    let content = html! {
+        form(method="post") {
+            : "Optional name:";
+            input(type="text", name="name");
+            input(type="submit", value="Create");
+        }
+    };
+    wiki_page("Create abstract", html!{}, content)
+}
+fn post_create_abstract(request: &Request, graph: &mut Graph) -> Response {
+    let form_data = try_or_400!(post_input!(request, { name: String }));
+    let name = form_data.name.trim();
+    let abstract_index = graph.create_abstract();
+    if name != "" {
+        let atom = graph.use_atom(Atom::text(name));
+        let _ = try_or_400!(graph.use_link(Link::new(atom, abstract_index)));
+    }
+    Response::redirect_303(object_url(abstract_index))
+}
+
+fn page_create_link<'a>(object: ObjectRef<'a>, link_side: LinkSide) -> Response {
+    let defined_link_side_text = match link_side {
+        LinkSide::From => "from",
+        LinkSide::To => "to",
+    };
+    let undefined_link_side_text = match link_side {
+        LinkSide::From => "to",
+        LinkSide::To => "from",
+    };
+    let graph = object.graph();
+    let name = object_name(object);
+    let class = object_html_class(object);
+    let url = object_url(object.index());
+
+    let title = format!("Create link {} {}", defined_link_side_text, name);
+    let content = html! {
+        p {
+            : format!("Create link {} ", defined_link_side_text);
+            a(href=url, class=class) : name;
+        }
+        form(method="post", action="/create/link") {
+            input(type="hidden", name=defined_link_side_text, value=object.index());
+            @ for object in graph.objects() {
+                input(type="radio", name=undefined_link_side_text, value=object.index()) {
+                    : object_name(object);
+                }
+                br;
+            }
+            input(type="submit", value="Create");
+        }
+    };
+    wiki_page(title, html!{}, content)
+}
+fn post_create_link(request: &Request, graph: &mut Graph) -> Response {
+    let l = try_or_400!(post_input!(request, { from: Index, to: Index }));
+    let index = try_or_400!(graph.use_link(Link::new(l.from, l.to)));
+    Response::redirect_303(object_url(index))
+}
+
+// Page template
 fn wiki_page<T, N, C>(title: T, additional_nav_links: N, content: C) -> Response
 where
     T: RenderOnce,
@@ -176,178 +336,6 @@ where
     Response::html(template.into_string().unwrap())
 }
 
-fn main_page(graph: &Graph) -> Response {
-    if let Some(wiki_main) = graph.get_atom(&Atom::text("_wiki_main")) {
-        if let Some(out_link) = wiki_main.out_links().first() {
-            if let Object::Link(ref l) = *out_link {
-                return Response::redirect_303(object_url(l.to));
-            }
-        }
-    }
-    wiki_page(
-        "Main page",
-        html!{},
-        html! {
-            p : "Create a link from \"_wiki_main\" to a graph object to define it as the home page.";
-        },
-    )
-}
-
-fn page_all_objects(graph: &Graph) -> Response {
-    wiki_page(
-        "Object list",
-        html!{},
-        html! {
-            h1(class="atom") : "Atoms";
-            ul {
-                @ for object in graph.objects().filter(|o| o.is_atom()) {
-                    li : object_link(object);
-                }
-            }
-            h1(class="abstract") : "Abstract";
-            ul {
-                @ for object in graph.objects().filter(|o| o.is_abstract()) {
-                    li : object_link(object);
-                }
-            }
-            h1(class="link") : "Links";
-            ul {
-                @ for object in graph.objects().filter(|o| o.is_link()) {
-                    li : object_link(object);
-                }
-            }
-        },
-    )
-}
-
-fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
-    let graph = object.graph();
-    let title = object_name(object);
-    let details: Box<Render> = match *object {
-        Object::Atom(ref a) => box_html! { : a.to_string(); },
-        Object::Link(ref l) => box_html! {
-            ul {
-                li {
-                    : "From ";
-                    : object_link(graph.object(l.from));
-                }
-                li {
-                    : "To ";
-                    : object_link(graph.object(l.to));
-                }
-            }
-        },
-        Object::Abstract => box_html! { : "Abstract"; },
-    };
-    wiki_page(
-        &title,
-        html! {
-            a(href=format!("/create/link/to/{}", object.index()), class="link") : "Link to";
-            a(href=format!("/create/link/from/{}", object.index()), class="link") : "Link from";
-        },
-        html! {
-            h1(class=object_html_class(object)) : &title;
-            p : &details;
-            h2 : "Linked from";
-            ul {
-                @ for object in object.in_links() {
-                    li : object_link(object);
-                }
-            }
-            h2 : "Links to";
-            ul {
-                @ for object in object.out_links() {
-                    li : object_link(object);
-                }
-            }
-        },
-    )
-}
-
-fn page_create_atom() -> Response {
-    wiki_page(
-        "Create atom",
-        html!{},
-        html!{
-            form(method="post") {
-                : "Value:";
-                input(type="text", name="text");
-                input(type="submit", value="Create");
-            }
-        },
-    )
-}
-fn post_create_atom(request: &Request, graph: &mut Graph) -> Response {
-    let form_data = try_or_400!(post_input!(request, { text: String }));
-    let text = form_data.text.trim();
-    let index = graph.use_atom(Atom::text(text));
-    Response::redirect_303(object_url(index))
-}
-
-fn page_create_abstract() -> Response {
-    wiki_page(
-        "Create abstract",
-        html!{},
-        html!{
-            form(method="post") {
-                : "Optional name:";
-                input(type="text", name="name");
-                input(type="submit", value="Create");
-            }
-        },
-    )
-}
-fn post_create_abstract(request: &Request, graph: &mut Graph) -> Response {
-    let form_data = try_or_400!(post_input!(request, { name: String }));
-    let name = form_data.name.trim();
-    let abstract_index = graph.create_abstract();
-    if name != "" {
-        let atom = graph.use_atom(Atom::text(name));
-        let _ = try_or_400!(graph.use_link(Link::new(atom, abstract_index)));
-    }
-    Response::redirect_303(object_url(abstract_index))
-}
-
-fn page_create_link<'a>(object: ObjectRef<'a>, link_side: LinkSide) -> Response {
-    let defined_link_side_text = match link_side {
-        LinkSide::From => "from",
-        LinkSide::To => "to",
-    };
-    let undefined_link_side_text = match link_side {
-        LinkSide::From => "to",
-        LinkSide::To => "from",
-    };
-    let graph = object.graph();
-    let name = object_name(object);
-    let class = object_html_class(object);
-    let url = object_url(object.index());
-    wiki_page(
-        format!("Create link {} {}", defined_link_side_text, name),
-        html!{},
-        html!{
-            p {
-                : format!("Create link {} ", defined_link_side_text);
-                a(href=url, class=class) : name;
-            }
-            form(method="post", action="/create/link") {
-                input(type="hidden", name=defined_link_side_text, value=object.index());
-                @ for object in graph.objects() {
-                    input(type="radio", name=undefined_link_side_text, value=object.index()) {
-                        : object_name(object);
-                    }
-                    br;
-                }
-                input(type="submit", value="Create");
-            }
-        },
-    )
-}
-fn post_create_link(request: &Request, graph: &mut Graph) -> Response {
-    let l = try_or_400!(post_input!(request, { from: Index, to: Index }));
-    let index = try_or_400!(graph.use_link(Link::new(l.from, l.to)));
-    Response::redirect_303(object_url(index))
-}
-
 /* Wiki external files.
  * Static files are much easier to edit as standalone.
  * Use rust_embed to embed them in the binary (on release mode only).
@@ -362,6 +350,7 @@ fn send_asset(path: &str) -> Response {
             path if path.ends_with(".css") => "text/css",
             path if path.ends_with(".html") => "text/html",
             path if path.ends_with(".js") => "application/javascript",
+            path if path.ends_with(".pdf") => "application/pdf",
             path if path.ends_with(".ico") => "image/vnd.microsoft.icon",
             _ => "application/octet-stream",
         };
