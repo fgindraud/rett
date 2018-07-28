@@ -281,9 +281,10 @@ fn match_graph(pattern: &Graph, target: &Graph) -> Option<HashMap<Index, Index>>
         }
 
         // Match ends if matched object is link
-        if let Object::Link(ref pattern_link) = *matched_pattern_object {
-            let target_link = matched_target_object.as_link();
-
+        if let (&Object::Link(ref pattern_link), &Object::Link(ref target_link)) = (
+            matched_pattern_object.as_ref(),
+            matched_target_object.as_ref(),
+        ) {
             // Match from/to objects
             if !mapping.add(pattern_link.from, target_link.from) {
                 return None;

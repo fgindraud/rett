@@ -259,6 +259,13 @@ impl Graph {
     }
 }
 
+/// Reference to link from/to as ObjectRef.
+#[derive(Clone, Copy)]
+pub struct LinkRef<'a> {
+    pub from: ObjectRef<'a>,
+    pub to: ObjectRef<'a>,
+}
+
 /// Reference an object and its data. Has AsRef and Deref to behave like an Object.
 #[derive(Clone, Copy)]
 pub struct ObjectRef<'a> {
@@ -275,6 +282,15 @@ impl<'a> ObjectRef<'a> {
     }
     pub fn description(&self) -> &str {
         &self.object_data.description
+    }
+    pub fn as_link(&self) -> Option<LinkRef<'a>> {
+        match self.object_data.object {
+            Object::Link(ref l) => Some(LinkRef {
+                from: self.graph.object(l.from),
+                to: self.graph.object(l.to),
+            }),
+            _ => None,
+        }
     }
     pub fn in_links_index(&self) -> &[Index] {
         &self.object_data.in_links
@@ -326,13 +342,6 @@ impl Object {
             _ => false,
         }
     }
-    // FIXME not very structured like. keep or improve depending on use cases
-    pub fn as_link(&self) -> &Link {
-        match *self {
-            Object::Link(ref l) => l,
-            _ => panic!("not a link"),
-        }
-    }
 }
 
 /// Iterate on objects in order of increasing indexes.
@@ -356,7 +365,7 @@ impl<'a> Iterator for OrderedObjectIterator<'a> {
     }
 }
 
-/// Slice of object refs (wraps a slice of indexes).
+/// Slice of link refs (in/out links are always links).
 #[derive(Clone, Copy)]
 pub struct ObjectRefSlice<'a> {
     indexes: &'a [Index],
@@ -373,7 +382,11 @@ impl<'a> ObjectRefSlice<'a> {
         self.graph.object(self.indexes[i])
     }
     pub fn first(&self) -> Option<ObjectRef<'a>> {
-        self.indexes.first().map(|&i| self.graph.object(i))
+        if self.indexes.len() > 0 {
+            Some(self.at(0))
+        } else {
+            None
+        }
     }
 }
 

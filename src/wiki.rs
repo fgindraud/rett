@@ -56,7 +56,7 @@ mod database {
     }
 }
 
-use graph::{Atom, Graph, Index, Link, Object, ObjectRef};
+use graph::{self, Atom, Graph, Index, Link, Object, ObjectRef};
 use horrorshow::{self, Render, RenderOnce, Template};
 use rouille::{self, Request, Response};
 use std::path::Path;
@@ -133,7 +133,21 @@ fn object_name<'a>(object: ObjectRef<'a>) -> String {
     match *object {
         Object::Atom(ref a) => a.to_string(),
         Object::Link(ref l) => format!("{} → {}", l.from, l.to),
-        Object::Abstract => format!("Object {}", object.index()),
+        Object::Abstract => {
+            let has_name_parent = |l: ObjectRef<'a>| match *l.as_link().unwrap().from {
+                Object::Atom(ref a) => match *a {
+                    Atom::Text(ref t) if t == "name" => true,
+                    _ => false,
+                },
+                _ => false,
+            };
+            let is_naming_link = |l: &ObjectRef<'a>| l.in_links().into_iter().any(has_name_parent);
+            if let Some(naming_link) = object.in_links().into_iter().find(is_naming_link) {
+                object_name(naming_link.as_link().unwrap().from)
+            } else {
+                format!("Object {}", object.index())
+            }
+        }
     }
 }
 
