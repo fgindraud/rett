@@ -19,6 +19,8 @@ extern crate clap; // Command line parser
 mod graph;
 use graph::{Atom, Graph, Index, Link, Object};
 
+mod graph2;
+
 /// Wiki interface
 mod wiki;
 
