@@ -2,6 +2,7 @@ use std;
 use std::collections::HashMap;
 use std::fmt;
 
+/// Error type for graph operations
 #[derive(Debug)]
 pub enum Error {
     InvalidIndex,
@@ -17,6 +18,7 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
+// Index types
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ObjectIndex(usize);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -26,6 +28,7 @@ pub struct TagIndex(usize);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct AtomIndex(usize);
 
+// Element types
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Link {
     from: ObjectIndex,
@@ -38,7 +41,7 @@ enum Atom {
     Text(String),
 }
 
-// TODO
+// Element data types: store element and back links
 struct ObjectData {
     description: String,
     in_links: SortedVec<LinkIndex>,
@@ -54,6 +57,7 @@ struct AtomData {
     atom: Atom,
 }
 
+/// Relation graph
 struct Graph {
     objects: SlotVec<ObjectData>,
     links: SlotVec<LinkData>,
@@ -62,78 +66,51 @@ struct Graph {
     link_indexes: HashMap<Link, LinkIndex>,
 }
 
-trait IndexForElement<E> {
-    type Index;
-    fn get(&self, e: &E) -> Option<Self::Index>;
-    fn insert(&mut self, e: E) -> Self::Index;
-}
-impl IndexForElement<Link> for Graph {
-    type Index = LinkIndex;
-    fn get(&self, l: &Link) -> Option<Self::Index> {
-        self.link_indexes.get(l).cloned()
-    }
-    fn insert(&mut self, l: Link) -> Self::Index {
-        // TODO check link indexes, should return error...
-        match self.get(&l) {
-            Some(index) => index,
-            None => {
-                let d = LinkData { link: l.clone() };
-                let new_index = LinkIndex(self.links.insert(d));
-                self.objects[l.from.0].out_links.insert(new_index);
-                self.objects[l.to.0].in_links.insert(new_index);
-                self.link_indexes.insert(l, new_index);
-                new_index
-            }
-        }
-    }
-}
-// TODO for atoms, tag
-
 /// Access elements by index, for multiple index types.
-trait ElementForIndex<I> {
+trait ElementForIndex<'g, I> {
     type Ref;
-    fn get(&self, i: I) -> Result<Self::Ref, Error>;
-    fn element(&self, i: I) -> Self::Ref {
+    fn get(&'g self, i: I) -> Result<Self::Ref, Error>;
+    fn element(&'g self, i: I) -> Self::Ref {
         self.get(i).unwrap()
     }
-    fn valid(&self, i: I) -> bool {
+    fn valid(&'g self, i: I) -> bool {
         self.get(i).is_ok()
     }
 }
-impl<'a> ElementForIndex<ObjectIndex> for &'a Graph {
-    type Ref = ElementRef<'a, ObjectIndex, ObjectData>;
-    fn get(&self, i: ObjectIndex) -> Result<Self::Ref, Error> {
-        self.objects.get(i.0).map(|e| ElementRef {
+impl<'g> ElementForIndex<'g, ObjectIndex> for Graph {
+    type Ref = ObjectRef<'g>;
+    fn get(&'g self, i: ObjectIndex) -> Result<Self::Ref, Error> {
+        self.objects.get(i.0).map(|e| ObjectRef {
             index: i,
             data: e,
             graph: self,
         })
     }
 }
-impl<'a> ElementForIndex<LinkIndex> for &'a Graph {
-    type Ref = ElementRef<'a, LinkIndex, LinkData>;
-    fn get(&self, i: LinkIndex) -> Result<Self::Ref, Error> {
-        self.links.get(i.0).map(|e| ElementRef {
+impl<'g> ElementForIndex<'g, LinkIndex> for Graph {
+    type Ref = LinkRef<'g>;
+    fn get(&'g self, i: LinkIndex) -> Result<Self::Ref, Error> {
+        self.links.get(i.0).map(|e| LinkRef {
             index: i,
             data: e,
             graph: self,
         })
     }
 }
-impl<'a> ElementForIndex<TagIndex> for &'a Graph {
-    type Ref = ElementRef<'a, TagIndex, TagData>;
-    fn get(&self, i: TagIndex) -> Result<Self::Ref, Error> {
-        self.tags.get(i.0).map(|e| ElementRef {
+impl<'g> ElementForIndex<'g, TagIndex> for Graph {
+    type Ref = TagRef<'g>;
+    fn get(&'g self, i: TagIndex) -> Result<Self::Ref, Error> {
+        self.tags.get(i.0).map(|e| TagRef {
             index: i,
             data: e,
             graph: self,
         })
     }
 }
-impl<'a> ElementForIndex<AtomIndex> for &'a Graph {
-    type Ref = ElementRef<'a, AtomIndex, AtomData>;
-    fn get(&self, i: AtomIndex) -> Result<Self::Ref, Error> {
-        self.atoms.get(i.0).map(|e| ElementRef {
+impl<'g> ElementForIndex<'g, AtomIndex> for Graph {
+    type Ref = AtomRef<'g>;
+    fn get(&'g self, i: AtomIndex) -> Result<Self::Ref, Error> {
+        self.atoms.get(i.0).map(|e| AtomRef {
             index: i,
             data: e,
             graph: self,
@@ -141,22 +118,67 @@ impl<'a> ElementForIndex<AtomIndex> for &'a Graph {
     }
 }
 
-// Fat references for easy graph traversal
-struct ElementRef<'a, I, D: 'a> {
-    index: I,
-    data: &'a D,
-    graph: &'a Graph,
+/// Get index for an element (if indexed)
+trait IndexForElement<E> {
+    type Index;
+    fn index_of(&self, e: &E) -> Option<Self::Index>;
 }
-impl<'a, I: Clone, D: 'a> ElementRef<'a, I, D> {
-    fn index(&self) -> I {
-        self.index.clone()
-    }
-    fn graph(&self) -> &'a Graph {
-        self.graph
+impl IndexForElement<Link> for Graph {
+    type Index = LinkIndex;
+    fn index_of(&self, l: &Link) -> Option<Self::Index> {
+        self.link_indexes.get(l).cloned()
     }
 }
-// TODO impls for specific types
-//
+
+/// Insert an element if not already present.
+impl Graph {
+    pub fn create_object(&mut self) -> ObjectIndex {
+        let d = ObjectData {
+            description: String::new(),
+            in_links: SortedVec::new(),
+            out_links: SortedVec::new(),
+        };
+        ObjectIndex(self.objects.insert(d))
+    }
+    pub fn insert_link(&mut self, l: Link) -> Result<LinkIndex, Error> {
+        if self.valid(l.from) && self.valid(l.to) {
+            Ok(match self.index_of(&l) {
+                Some(index) => index,
+                None => {
+                    let d = LinkData { link: l.clone() };
+                    let new_index = LinkIndex(self.links.insert(d));
+                    self.objects[l.from.0].out_links.insert(new_index);
+                    self.objects[l.to.0].in_links.insert(new_index);
+                    self.link_indexes.insert(l, new_index);
+                    new_index
+                }
+            })
+        } else {
+            Err(Error::InvalidIndex)
+        }
+    }
+}
+
+pub struct ObjectRef<'g> {
+    index: ObjectIndex,
+    data: &'g ObjectData,
+    graph: &'g Graph,
+}
+pub struct LinkRef<'g> {
+    index: LinkIndex,
+    data: &'g LinkData,
+    graph: &'g Graph,
+}
+pub struct TagRef<'g> {
+    index: TagIndex,
+    data: &'g TagData,
+    graph: &'g Graph,
+}
+pub struct AtomRef<'g> {
+    index: AtomIndex,
+    data: &'g AtomData,
+    graph: &'g Graph,
+}
 
 /// Vector where elements never change indexes. Removal generate holes.
 struct SlotVec<T> {
