@@ -56,7 +56,7 @@ mod database {
     }
 }
 
-use graph::{self, Atom, Graph, Index, Link, Object, ObjectRef};
+use graph::{Atom, Graph, Index, Link, Object, ObjectRef};
 use horrorshow::{self, Render, RenderOnce, Template};
 use rouille::{self, Request, Response};
 use std::path::Path;

@@ -17,7 +17,7 @@ extern crate clap; // Command line parser
 
 /// Knowledge graph definition.
 mod graph;
-use graph::{Atom, Graph, Index, Link, Object};
+use graph::{Graph, Index, Object};
 
 mod graph2;
 
