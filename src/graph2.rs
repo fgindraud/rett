@@ -28,15 +28,28 @@ pub struct TagIndex(usize);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct AtomIndex(usize);
 
-// Element types
+/// Link between two Object.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Link {
     from: ObjectIndex,
     to: ObjectIndex,
 }
+
+/// Tag: add information to an Object, Link, or other Tag.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Tag {
-    tag: AtomIndex,
+    source: AtomIndex,
+    target: TagTargetIndex,
 }
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum TagTargetIndex {
+    Object(ObjectIndex),
+    Link(LinkIndex),
+    Tag(TagIndex),
+}
+
+/// Atom: basic piece of data, indexed.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Atom {
     Text(String),
 }
@@ -46,15 +59,19 @@ struct ObjectData {
     description: String,
     in_links: Set<LinkIndex>,
     out_links: Set<LinkIndex>,
+    tag_target: Set<TagIndex>,
 }
 struct LinkData {
     link: Link,
+    tag_target: Set<TagIndex>,
 }
 struct TagData {
     tag: Tag,
+    tag_target: Set<TagIndex>,
 }
 struct AtomData {
     atom: Atom,
+    tag_source: Set<TagIndex>,
 }
 
 /// Relation graph
@@ -64,6 +81,8 @@ struct Graph {
     tags: SlotVec<TagData>,
     atoms: SlotVec<AtomData>,
     link_indexes: HashMap<Link, LinkIndex>,
+    tag_indexes: HashMap<Tag, TagIndex>,
+    atom_indexes: HashMap<Atom, AtomIndex>,
 }
 
 /// Access elements by index, for multiple index types.
@@ -119,6 +138,18 @@ impl IndexForElement<Link> for Graph {
         self.link_indexes.get(l).cloned()
     }
 }
+impl IndexForElement<Tag> for Graph {
+    type Index = TagIndex;
+    fn index_of(&self, t: &Tag) -> Option<Self::Index> {
+        self.tag_indexes.get(t).cloned()
+    }
+}
+impl IndexForElement<Atom> for Graph {
+    type Index = AtomIndex;
+    fn index_of(&self, t: &Atom) -> Option<Self::Index> {
+        self.atom_indexes.get(t).cloned()
+    }
+}
 
 /// Insert an element if not already present.
 impl Graph {
@@ -127,24 +158,68 @@ impl Graph {
             description: String::new(),
             in_links: Set::new(),
             out_links: Set::new(),
+            tag_target: Set::new(),
         };
         ObjectIndex(self.objects.insert(d))
     }
     pub fn insert_link(&mut self, l: Link) -> Result<LinkIndex, Error> {
-        if self.valid(l.from) && self.valid(l.to) {
-            Ok(match self.index_of(&l) {
-                Some(index) => index,
-                None => {
-                    let d = LinkData { link: l.clone() };
-                    let new_index = LinkIndex(self.links.insert(d));
-                    self.objects[l.from.0].out_links.insert(new_index);
-                    self.objects[l.to.0].in_links.insert(new_index);
-                    self.link_indexes.insert(l, new_index);
-                    new_index
+        if !(self.valid(l.from) && self.valid(l.to)) {
+            return Err(Error::InvalidIndex);
+        }
+        Ok(match self.index_of(&l) {
+            Some(index) => index,
+            None => {
+                let d = LinkData {
+                    link: l.clone(),
+                    tag_target: Set::new(),
+                };
+                let new_index = LinkIndex(self.links.insert(d));
+                self.objects[l.from.0].out_links.insert(new_index);
+                self.objects[l.to.0].in_links.insert(new_index);
+                self.link_indexes.insert(l, new_index);
+                new_index
+            }
+        })
+    }
+    pub fn insert_tag(&mut self, t: Tag) -> Result<TagIndex, Error> {
+        if !(self.valid(t.source) && match t.target {
+            TagTargetIndex::Object(o) => self.valid(o),
+            TagTargetIndex::Link(l) => self.valid(l),
+            TagTargetIndex::Tag(t) => self.valid(t),
+        }) {
+            return Err(Error::InvalidIndex);
+        }
+        Ok(match self.index_of(&t) {
+            Some(index) => index,
+            None => {
+                let d = TagData {
+                    tag: t.clone(),
+                    tag_target: Set::new(),
+                };
+                let new_index = TagIndex(self.tags.insert(d));
+                self.atoms[t.source.0].tag_source.insert(new_index);
+                match t.target {
+                    TagTargetIndex::Object(o) => self.objects[o.0].tag_target.insert(new_index),
+                    TagTargetIndex::Link(l) => self.links[l.0].tag_target.insert(new_index),
+                    TagTargetIndex::Tag(t) => self.tags[t.0].tag_target.insert(new_index),
                 }
-            })
-        } else {
-            Err(Error::InvalidIndex)
+                self.tag_indexes.insert(t, new_index);
+                new_index
+            }
+        })
+    }
+    pub fn insert_atom(&mut self, a: Atom) -> AtomIndex {
+        match self.index_of(&a) {
+            Some(index) => index,
+            None => {
+                let d = AtomData {
+                    atom: a.clone(),
+                    tag_source: Set::new(),
+                };
+                let new_index = AtomIndex(self.atoms.insert(d));
+                self.atom_indexes.insert(a, new_index);
+                new_index
+            }
         }
     }
 }
