@@ -44,8 +44,8 @@ enum Atom {
 // Element data types: store element and back links
 struct ObjectData {
     description: String,
-    in_links: SortedVec<LinkIndex>,
-    out_links: SortedVec<LinkIndex>,
+    in_links: Set<LinkIndex>,
+    out_links: Set<LinkIndex>,
 }
 struct LinkData {
     link: Link,
@@ -67,54 +67,44 @@ struct Graph {
 }
 
 /// Access elements by index, for multiple index types.
-trait ElementForIndex<'g, I> {
-    type Ref;
-    fn get(&'g self, i: I) -> Result<Self::Ref, Error>;
-    fn element(&'g self, i: I) -> Self::Ref {
-        self.get(i).unwrap()
-    }
-    fn valid(&'g self, i: I) -> bool {
+trait ElementForIndex<I> {
+    type Data;
+    fn get(&self, i: I) -> Result<&Self::Data, Error>;
+    fn valid(&self, i: I) -> bool {
         self.get(i).is_ok()
     }
 }
-impl<'g> ElementForIndex<'g, ObjectIndex> for Graph {
-    type Ref = ObjectRef<'g>;
-    fn get(&'g self, i: ObjectIndex) -> Result<Self::Ref, Error> {
-        self.objects.get(i.0).map(|e| ObjectRef {
-            index: i,
-            data: e,
-            graph: self,
-        })
+impl<I> std::ops::Index<I> for Graph
+where
+    Graph: ElementForIndex<I>,
+{
+    type Output = <Self as ElementForIndex<I>>::Data;
+    fn index(&self, i: I) -> &Self::Output {
+        self.get(i).unwrap()
     }
 }
-impl<'g> ElementForIndex<'g, LinkIndex> for Graph {
-    type Ref = LinkRef<'g>;
-    fn get(&'g self, i: LinkIndex) -> Result<Self::Ref, Error> {
-        self.links.get(i.0).map(|e| LinkRef {
-            index: i,
-            data: e,
-            graph: self,
-        })
+impl ElementForIndex<ObjectIndex> for Graph {
+    type Data = ObjectData;
+    fn get(&self, i: ObjectIndex) -> Result<&Self::Data, Error> {
+        self.objects.get(i.0)
     }
 }
-impl<'g> ElementForIndex<'g, TagIndex> for Graph {
-    type Ref = TagRef<'g>;
-    fn get(&'g self, i: TagIndex) -> Result<Self::Ref, Error> {
-        self.tags.get(i.0).map(|e| TagRef {
-            index: i,
-            data: e,
-            graph: self,
-        })
+impl ElementForIndex<LinkIndex> for Graph {
+    type Data = LinkData;
+    fn get(&self, i: LinkIndex) -> Result<&Self::Data, Error> {
+        self.links.get(i.0)
     }
 }
-impl<'g> ElementForIndex<'g, AtomIndex> for Graph {
-    type Ref = AtomRef<'g>;
-    fn get(&'g self, i: AtomIndex) -> Result<Self::Ref, Error> {
-        self.atoms.get(i.0).map(|e| AtomRef {
-            index: i,
-            data: e,
-            graph: self,
-        })
+impl ElementForIndex<TagIndex> for Graph {
+    type Data = TagData;
+    fn get(&self, i: TagIndex) -> Result<&Self::Data, Error> {
+        self.tags.get(i.0)
+    }
+}
+impl ElementForIndex<AtomIndex> for Graph {
+    type Data = AtomData;
+    fn get(&self, i: AtomIndex) -> Result<&Self::Data, Error> {
+        self.atoms.get(i.0)
     }
 }
 
@@ -135,8 +125,8 @@ impl Graph {
     pub fn create_object(&mut self) -> ObjectIndex {
         let d = ObjectData {
             description: String::new(),
-            in_links: SortedVec::new(),
-            out_links: SortedVec::new(),
+            in_links: Set::new(),
+            out_links: Set::new(),
         };
         ObjectIndex(self.objects.insert(d))
     }
@@ -157,27 +147,6 @@ impl Graph {
             Err(Error::InvalidIndex)
         }
     }
-}
-
-pub struct ObjectRef<'g> {
-    index: ObjectIndex,
-    data: &'g ObjectData,
-    graph: &'g Graph,
-}
-pub struct LinkRef<'g> {
-    index: LinkIndex,
-    data: &'g LinkData,
-    graph: &'g Graph,
-}
-pub struct TagRef<'g> {
-    index: TagIndex,
-    data: &'g TagData,
-    graph: &'g Graph,
-}
-pub struct AtomRef<'g> {
-    index: AtomIndex,
-    data: &'g AtomData,
-    graph: &'g Graph,
 }
 
 /// Vector where elements never change indexes. Removal generate holes.
@@ -228,28 +197,28 @@ impl<T> std::ops::IndexMut<usize> for SlotVec<T> {
 }
 
 /// Vector with sorted elements and set api.
-struct SortedVec<T: Ord> {
+pub struct Set<T: Ord> {
     inner: Vec<T>,
 }
-impl<T: Ord> SortedVec<T> {
-    fn new() -> Self {
-        SortedVec { inner: Vec::new() }
+impl<T: Ord> Set<T> {
+    pub fn new() -> Self {
+        Set { inner: Vec::new() }
     }
-    fn contains(&self, e: &T) -> bool {
+    pub fn contains(&self, e: &T) -> bool {
         self.inner.binary_search(e).is_ok()
     }
-    fn insert(&mut self, e: T) {
+    pub fn insert(&mut self, e: T) {
         if let Err(insertion_index) = self.inner.binary_search(&e) {
             self.inner.insert(insertion_index, e)
         }
     }
-    fn remove(&mut self, e: &T) {
+    pub fn remove(&mut self, e: &T) {
         if let Ok(index) = self.inner.binary_search(e) {
             self.inner.remove(index);
         }
     }
 }
-impl<'a, T: Ord> std::ops::Deref for SortedVec<T> {
+impl<T: Ord> std::ops::Deref for Set<T> {
     type Target = [T];
     fn deref(&self) -> &[T] {
         self.inner.deref()
