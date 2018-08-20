@@ -19,7 +19,7 @@ extern crate clap; // Command line parser
 mod graph;
 use graph::{Graph, Index, Object};
 
-mod graph2;
+mod corpus; // Graph v3 with sentences
 
 /// Wiki interface
 mod wiki;
