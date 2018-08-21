@@ -1,3 +1,4 @@
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std;
 use std::collections::HashMap;
 use std::fmt;
@@ -17,37 +18,40 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 // Index types
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct ObjectIndex(usize);
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct NounIndex(usize);
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct VerbIndex(usize);
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct SentenceIndex(usize);
 
 /// A single piece of text data, usable as a complement in a sentence.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 struct Noun(String);
 
 /// A verb used to link elements in a sentence. Can be "is" + adjective.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct Verb(String);
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+enum Verb {
+    IsNamed,
+    Text(String),
+}
 
 /// A sentence describes either an object, or another sentence (tagging).
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 enum Subject {
     Object(ObjectIndex),
     Sentence(SentenceIndex),
 }
 /// Additional description element.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 enum Complement {
     None,
     Noun(NounIndex),
     Object(ObjectIndex),
 }
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 struct Sentence {
     subject: Subject,
     verb: VerbIndex,
@@ -55,25 +59,35 @@ struct Sentence {
 }
 
 // Store elements and back links
+#[derive(Serialize, Deserialize)]
 struct ObjectData {
     description: String,
+    #[serde(skip)]
     subject_of: Set<SentenceIndex>,
+    #[serde(skip)]
     complement_of: Set<SentenceIndex>,
 }
+#[derive(Serialize, Deserialize)]
 struct NounData {
     noun: Noun,
+    #[serde(skip)]
     complement_of: Set<SentenceIndex>,
 }
+#[derive(Serialize, Deserialize)]
 struct VerbData {
     verb: Verb,
+    #[serde(skip)]
     verb_of: Set<SentenceIndex>,
 }
+#[derive(Serialize, Deserialize)]
 struct SentenceData {
     sentence: Sentence,
+    #[serde(skip)]
     subject_of: Set<SentenceIndex>,
 }
 
 /// Relation graph as a corpus of sentences.
+#[derive(Default, Serialize)]
 struct Corpus {
     objects: SlotVec<ObjectData>,
     nouns: SlotVec<NounData>,
@@ -150,8 +164,12 @@ impl IndexForElement<Sentence> for Corpus {
     }
 }
 
-/// Insert an element if not already present.
 impl Corpus {
+    /// Create an empty Corpus.
+    pub fn new() -> Corpus {
+        Corpus::default()
+    }
+
     pub fn create_object(&mut self) -> ObjectIndex {
         let d = ObjectData {
             description: String::new(),
@@ -225,7 +243,12 @@ impl Corpus {
     }
 }
 
+/******************************************************************************
+ * Utils.
+ */
+
 /// Vector where elements never change indexes. Removal generate holes.
+#[derive(Serialize, Deserialize)]
 struct SlotVec<T> {
     inner: Vec<Option<T>>,
 }
@@ -271,6 +294,11 @@ impl<T> std::ops::IndexMut<usize> for SlotVec<T> {
         self.get_mut(i).unwrap()
     }
 }
+impl<T> std::default::Default for SlotVec<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Vector with sorted elements and set api.
 pub struct Set<T: Ord> {
@@ -300,3 +328,16 @@ impl<T: Ord> std::ops::Deref for Set<T> {
         self.inner.deref()
     }
 }
+impl<T: Ord> std::default::Default for Set<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/******************************************************************************
+ * IO using serde.
+ */
+
+// TODO specialized Deserialize that restores links.
+
+// TODO basic tests
