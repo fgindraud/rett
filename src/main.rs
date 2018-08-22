@@ -19,7 +19,9 @@ extern crate clap; // Command line parser
 mod graph;
 use graph::{Graph, Index, Object};
 
-mod corpus; // Graph v3 with sentences
+/// Knowledge database as a set of sentences.
+mod corpus;
+use corpus::Corpus;
 
 /// Wiki interface
 mod wiki;
@@ -27,6 +29,7 @@ mod wiki;
 use std::fs::File;
 use std::path::Path;
 
+// TODO rm
 fn read_graph_from_file(filename: &Path) -> Graph {
     match File::open(filename) {
         Ok(file) => match serde_json::from_reader(file) {
@@ -46,7 +49,6 @@ fn read_graph_from_file(filename: &Path) -> Graph {
     eprintln!("Using empty graph");
     Graph::new()
 }
-
 fn write_graph_to_file(filename: &Path, graph: &Graph) {
     match File::create(filename) {
         Ok(file) => if let Err(e) = serde_json::to_writer(file, graph) {
@@ -58,6 +60,43 @@ fn write_graph_to_file(filename: &Path, graph: &Graph) {
         },
         Err(e) => eprintln!(
             "Warning: cannot write graph to {}: {}",
+            filename.display(),
+            e
+        ),
+    }
+}
+
+fn read_corpus_from_file(filename: &Path) -> Corpus {
+    match File::open(filename) {
+        Ok(file) => match serde_json::from_reader(file) {
+            Ok(corpus) => return corpus,
+            Err(e) => eprintln!(
+                "Warning: invalid corpus format in file {}: {}",
+                filename.display(),
+                e
+            ),
+        },
+        Err(e) => eprintln!(
+            "Warning: cannot read corpus from {}: {}",
+            filename.display(),
+            e
+        ),
+    }
+    eprintln!("Using empty corpus");
+    Corpus::new()
+}
+
+fn write_corpus_to_file(filename: &Path, corpus: &Corpus) {
+    match File::create(filename) {
+        Ok(file) => if let Err(e) = serde_json::to_writer(file, corpus) {
+            eprintln!(
+                "Warning: cannot write corpus to {}: {}",
+                filename.display(),
+                e
+            )
+        },
+        Err(e) => eprintln!(
+            "Warning: cannot write corpus to {}: {}",
             filename.display(),
             e
         ),
