@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer};
 use std;
 use std::collections::HashMap;
 use std::fmt;
@@ -93,8 +93,11 @@ struct Corpus {
     nouns: SlotVec<NounData>,
     verbs: SlotVec<VerbData>,
     sentences: SlotVec<SentenceData>,
+    #[serde(skip)]
     noun_indexes: HashMap<Noun, NounIndex>,
+    #[serde(skip)]
     verb_indexes: HashMap<Verb, VerbIndex>,
+    #[serde(skip)]
     sentence_indexes: HashMap<Sentence, SentenceIndex>,
 }
 
@@ -230,13 +233,13 @@ impl Corpus {
                 match s.subject {
                     Subject::Object(o) => self.objects[o.0].subject_of.insert(new_index),
                     Subject::Sentence(s) => self.sentences[s.0].subject_of.insert(new_index),
-                };
+                }
                 self.verbs[s.verb.0].verb_of.insert(new_index);
                 match s.complement {
                     Complement::None => (),
                     Complement::Noun(n) => self.nouns[n.0].complement_of.insert(new_index),
                     Complement::Object(o) => self.objects[o.0].complement_of.insert(new_index),
-                };
+                }
                 new_index
             }
         })
@@ -336,8 +339,80 @@ impl<T: Ord> std::default::Default for Set<T> {
 
 /******************************************************************************
  * IO using serde.
+ *
+ * Serialized as multiple Vec<Opt<DataStruct>>.
+ * Foreach DataStruct, only serialize the inner object (not the backlinks).
+ * After a row of serialize + deserialize, indexes are conserved.
  */
 
-// TODO specialized Deserialize that restores links.
+#[derive(Deserialize)]
+struct NotValidatedCorpus {
+    objects: SlotVec<ObjectData>,
+    nouns: SlotVec<NounData>,
+    verbs: SlotVec<VerbData>,
+    sentences: SlotVec<SentenceData>,
+}
+
+/// Deserialize : backlinks must be restored and indexes validated.
+impl<'d> Deserialize<'d> for Corpus {
+    fn deserialize<D: Deserializer<'d>>(deserializer: D) -> Result<Self, D::Error> {
+        let deserialized = NotValidatedCorpus::deserialize(deserializer)?;
+
+        // Extract data in a new corpus
+        let mut corpus = Corpus::new();
+        corpus.objects = deserialized.objects;
+        corpus.nouns = deserialized.nouns;
+        corpus.verbs = deserialized.verbs;
+        corpus.sentences = deserialized.sentences;
+
+        // Restore back links and validate
+        use serde::de::Error as DE;
+        for index in 0..corpus.sentences.inner.len() {
+            if corpus.sentences.get(index).is_ok() {
+                // Clone Sentence struct to avoid clash with mutable refs for Corpus changes.
+                let sentence = corpus.sentences[index].sentence.clone();
+                let s_index = SentenceIndex(index);
+                // Restore links, validate indexes at the same time.
+                match sentence.subject {
+                    Subject::Object(o) => corpus
+                        .objects
+                        .get_mut(o.0)
+                        .map_err(DE::custom)?
+                        .subject_of
+                        .insert(s_index),
+                    Subject::Sentence(s) => corpus
+                        .sentences
+                        .get_mut(s.0)
+                        .map_err(DE::custom)?
+                        .subject_of
+                        .insert(s_index),
+                }
+                corpus
+                    .verbs
+                    .get_mut(sentence.verb.0)
+                    .map_err(DE::custom)?
+                    .verb_of
+                    .insert(s_index);
+                match sentence.complement {
+                    Complement::None => (),
+                    Complement::Noun(n) => corpus
+                        .nouns
+                        .get_mut(n.0)
+                        .map_err(DE::custom)?
+                        .complement_of
+                        .insert(s_index),
+                    Complement::Object(o) => corpus
+                        .objects
+                        .get_mut(o.0)
+                        .map_err(DE::custom)?
+                        .complement_of
+                        .insert(s_index),
+                }
+            }
+        }
+
+        Ok(corpus)
+    }
+}
 
 // TODO basic tests
