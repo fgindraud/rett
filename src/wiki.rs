@@ -3,55 +3,55 @@
  * In its own module to scope the use;
  */
 mod database {
-    use graph::Graph;
-    use read_graph_from_file;
+    use corpus::Corpus;
+    use read_corpus_from_file;
     use std::ops::{Deref, DerefMut};
     use std::path::{Path, PathBuf};
     use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-    use write_graph_to_file;
+    use write_corpus_to_file;
 
     pub struct Database {
         file: PathBuf,
-        graph: RwLock<Graph>,
+        corpus: RwLock<Corpus>,
     }
     impl Database {
         /// Initialize graph from file content.
         pub fn from_file(file: &Path) -> Self {
             Database {
                 file: file.to_owned(),
-                graph: RwLock::new(read_graph_from_file(file)),
+                corpus: RwLock::new(read_corpus_from_file(file)),
             }
         }
         /// Get read only access to the database.
-        pub fn access(&self) -> RwLockReadGuard<Graph> {
-            self.graph.read().unwrap()
+        pub fn access(&self) -> RwLockReadGuard<Corpus> {
+            self.corpus.read().unwrap()
         }
         /// Get write access to the database ; writes database to disk when lock is released.
         pub fn modify<'a>(&'a self) -> DatabaseWriteLock<'a> {
             DatabaseWriteLock {
                 file: &self.file,
-                lock: self.graph.write().unwrap(),
+                lock: self.corpus.write().unwrap(),
             }
         }
     }
     pub struct DatabaseWriteLock<'a> {
         file: &'a Path,
-        lock: RwLockWriteGuard<'a, Graph>,
+        lock: RwLockWriteGuard<'a, Corpus>,
     }
     impl<'a> Deref for DatabaseWriteLock<'a> {
-        type Target = Graph;
-        fn deref(&self) -> &Graph {
+        type Target = Corpus;
+        fn deref(&self) -> &Corpus{
             &self.lock
         }
     }
     impl<'a> DerefMut for DatabaseWriteLock<'a> {
-        fn deref_mut(&mut self) -> &mut Graph {
+        fn deref_mut(&mut self) -> &mut Corpus {
             &mut self.lock
         }
     }
     impl<'a> Drop for DatabaseWriteLock<'a> {
         fn drop(&mut self) {
-            write_graph_to_file(self.file, &self.lock)
+            write_corpus_to_file(self.file, &self.lock)
         }
     }
 }
