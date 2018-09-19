@@ -101,45 +101,71 @@ pub struct Corpus {
     sentence_indexes: HashMap<Sentence, SentenceIndex>,
 }
 
+/// Basic methods for an index type of the corpus.
+pub trait CorpusElementIndex {
+    type ElementData;
+    fn new(raw_index: usize) -> Self;
+    fn to_raw_index(&self) -> usize;
+    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData>;
+}
+impl CorpusElementIndex for ObjectIndex {
+    type ElementData = ObjectData;
+    fn new(i: usize) -> Self { ObjectIndex(i) }
+    fn to_raw_index(&self) -> usize {
+        self.0
+    }
+    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData> {
+        &corpus.objects
+    }
+}
+impl CorpusElementIndex for NounIndex {
+    type ElementData = NounData;
+    fn new(i: usize) -> Self { NounIndex(i) }
+    fn to_raw_index(&self) -> usize {
+        self.0
+    }
+    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData> {
+        &corpus.nouns
+    }
+}
+impl CorpusElementIndex for VerbIndex {
+    type ElementData = VerbData;
+    fn new(i: usize) -> Self { VerbIndex(i) }
+    fn to_raw_index(&self) -> usize {
+        self.0
+    }
+    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData> {
+        &corpus.verbs
+    }
+}
+impl CorpusElementIndex for SentenceIndex {
+    type ElementData = SentenceData;
+    fn new(i: usize) -> Self { SentenceIndex(i) }
+    fn to_raw_index(&self) -> usize {
+        self.0
+    }
+    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData> {
+        &corpus.sentences
+    }
+}
+
 /// Access elements by index, for multiple index types.
-pub trait ElementForIndex<I> {
-    type Data;
-    fn get(&self, i: I) -> Result<&Self::Data, Error>;
+pub trait ElementForIndex<I : CorpusElementIndex> {
+    fn get(&self, i: I) -> Result<&I::ElementData, Error>;
     fn valid(&self, i: I) -> bool {
         self.get(i).is_ok()
     }
 }
-impl<I> std::ops::Index<I> for Corpus
-where
-    Corpus: ElementForIndex<I>,
+impl<I: CorpusElementIndex> ElementForIndex<I> for Corpus {
+    fn get (&self, i: I) -> Result<&I::ElementData, Error> {
+        <I as CorpusElementIndex>::get_corpus_elements(self).get(i.to_raw_index())
+    }
+}
+impl<I : CorpusElementIndex> std::ops::Index<I> for Corpus
 {
-    type Output = <Self as ElementForIndex<I>>::Data;
+    type Output = I::ElementData;
     fn index(&self, i: I) -> &Self::Output {
         self.get(i).unwrap()
-    }
-}
-impl ElementForIndex<ObjectIndex> for Corpus {
-    type Data = ObjectData;
-    fn get(&self, i: ObjectIndex) -> Result<&Self::Data, Error> {
-        self.objects.get(i.0)
-    }
-}
-impl ElementForIndex<NounIndex> for Corpus {
-    type Data = NounData;
-    fn get(&self, i: NounIndex) -> Result<&Self::Data, Error> {
-        self.nouns.get(i.0)
-    }
-}
-impl ElementForIndex<VerbIndex> for Corpus {
-    type Data = VerbData;
-    fn get(&self, i: VerbIndex) -> Result<&Self::Data, Error> {
-        self.verbs.get(i.0)
-    }
-}
-impl ElementForIndex<SentenceIndex> for Corpus {
-    type Data = SentenceData;
-    fn get(&self, i: SentenceIndex) -> Result<&Self::Data, Error> {
-        self.sentences.get(i.0)
     }
 }
 
