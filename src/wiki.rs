@@ -56,22 +56,27 @@ mod database {
     }
 }
 
-use corpus::Corpus;
-use corpus::{ObjectIndex, NounIndex, VerbIndex, SentenceIndex};
-use corpus::{ObjectData, NounData, VerbData, SentenceData};
-use corpus::{CorpusElementIndex,ElementForIndex};
+use corpus::prelude::*;
 use horrorshow::{self, Render, RenderOnce, Template};
 use rouille::{self, Request, Response};
 use std::path::Path;
 
-enum LinkSide {
-    From,
-    To,
-}
-
 /******************************************************************************
  * HTTP server.
  */
+
+fn page_or_404<I, F> (corpus: &Corpus, i: I, f: F) -> Response
+where
+    I : CorpusElementIndex + Copy,
+    F: FnOnce (&Corpus, I) -> Response 
+{
+    if corpus.valid(i) {
+        f(corpus, i)
+    } else {
+        Response::empty_404()
+    }
+}
+
 pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
     let db = database::Database::from_file(file);
     eprintln!("Wiki starting on {}", addr);
@@ -82,10 +87,7 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
 //            (GET) ["/all"] => { page_all_objects(&db.access()) },
             // Objects by id
             (GET) ["/object/{id}", id: usize] => {
-                match db.access().get(ObjectIndex::new(id)) {
-                    Ok(object) => display_object_page(ObjectIndex::new(id), object),
-                    _ => Response::empty_404(),
-                }
+                page_or_404(&db.access(), ObjectIndex::new(id), display_object_page)
             },
             // Create elements (raw)
 //            (GET) ["/create/atom"] => { page_create_atom() },
@@ -149,7 +151,7 @@ fn sentence_name (id: SentenceIndex) -> String {
     format!("/sentence/{}", id.to_raw_index())
 }
 
-fn display_object_page(id: ObjectIndex, object: &ObjectData) -> Response {
+fn display_object_page(corpus: &Corpus, id: ObjectIndex) -> Response {
     let title = object_name(id);
     wiki_page (title, html!{}, html!{})
 }

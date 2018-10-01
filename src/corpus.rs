@@ -444,6 +444,17 @@ impl<'d> Deserialize<'d> for Corpus {
 }
 
 /******************************************************************************
+ * Prelude for easy import.
+ */
+pub mod prelude {
+    pub use super::Corpus;
+    pub use super::{ObjectIndex, NounIndex, VerbIndex, SentenceIndex};
+
+    // Traits
+    pub use super::{CorpusElementIndex,ElementForIndex,IndexForElement};
+}
+
+/******************************************************************************
  * Tests.
  */
 #[cfg(test)]
