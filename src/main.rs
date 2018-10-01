@@ -97,7 +97,8 @@ fn main() {
     match matches.subcommand() {
         ("wiki", Some(args)) => {
             let addr = args.value_of("addr").unwrap();
-            let nb_threads = args.value_of("nb_threads")
+            let nb_threads = args
+                .value_of("nb_threads")
                 .unwrap()
                 .parse()
                 .expect("nb_threads: usize");

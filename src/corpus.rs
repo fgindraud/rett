@@ -106,67 +106,93 @@ pub trait CorpusElementIndex {
     type ElementData;
     fn new(raw_index: usize) -> Self;
     fn to_raw_index(&self) -> usize;
-    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData>;
+    // Used to enable ElementForIndex<I> automatic implementation
+    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error>;
 }
 impl CorpusElementIndex for ObjectIndex {
     type ElementData = ObjectData;
-    fn new(i: usize) -> Self { ObjectIndex(i) }
+    fn new(i: usize) -> Self {
+        ObjectIndex(i)
+    }
     fn to_raw_index(&self) -> usize {
         self.0
     }
-    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData> {
-        &corpus.objects
+    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error> {
+        corpus.objects.get(self.to_raw_index())
     }
 }
 impl CorpusElementIndex for NounIndex {
     type ElementData = NounData;
-    fn new(i: usize) -> Self { NounIndex(i) }
+    fn new(i: usize) -> Self {
+        NounIndex(i)
+    }
     fn to_raw_index(&self) -> usize {
         self.0
     }
-    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData> {
-        &corpus.nouns
+    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error> {
+        corpus.nouns.get(self.to_raw_index())
     }
 }
 impl CorpusElementIndex for VerbIndex {
     type ElementData = VerbData;
-    fn new(i: usize) -> Self { VerbIndex(i) }
+    fn new(i: usize) -> Self {
+        VerbIndex(i)
+    }
     fn to_raw_index(&self) -> usize {
         self.0
     }
-    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData> {
-        &corpus.verbs
+    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error> {
+        corpus.verbs.get(self.to_raw_index())
     }
 }
 impl CorpusElementIndex for SentenceIndex {
     type ElementData = SentenceData;
-    fn new(i: usize) -> Self { SentenceIndex(i) }
+    fn new(i: usize) -> Self {
+        SentenceIndex(i)
+    }
     fn to_raw_index(&self) -> usize {
         self.0
     }
-    fn get_corpus_elements(corpus: &Corpus) -> &SlotVec<Self::ElementData> {
-        &corpus.sentences
+    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error> {
+        corpus.sentences.get(self.to_raw_index())
     }
 }
 
 /// Access elements by index, for multiple index types.
-pub trait ElementForIndex<I : CorpusElementIndex> {
+pub trait ElementForIndex<I: CorpusElementIndex> {
     fn get(&self, i: I) -> Result<&I::ElementData, Error>;
     fn valid(&self, i: I) -> bool {
         self.get(i).is_ok()
     }
+    fn get_ref(&self, i: I) -> Result<Ref<I>, Error>;
 }
-impl<I: CorpusElementIndex> ElementForIndex<I> for Corpus {
-    fn get (&self, i: I) -> Result<&I::ElementData, Error> {
-        <I as CorpusElementIndex>::get_corpus_elements(self).get(i.to_raw_index())
+impl<I: CorpusElementIndex + Clone> ElementForIndex<I> for Corpus {
+    fn get(&self, i: I) -> Result<&I::ElementData, Error> {
+        i.get_element(self)
+    }
+    fn get_ref(&self, i: I) -> Result<Ref<I>, Error> {
+        self.get(i.clone()).map(|e| Ref {
+            corpus: self,
+            index: i,
+            element: e,
+        })
     }
 }
-impl<I : CorpusElementIndex> std::ops::Index<I> for Corpus
-{
+impl<I: CorpusElementIndex + Clone> std::ops::Index<I> for Corpus {
     type Output = I::ElementData;
     fn index(&self, i: I) -> &Self::Output {
         self.get(i).unwrap()
     }
+}
+// TODO add api
+pub struct Ref<'a, I>
+where
+    I: CorpusElementIndex,
+    I::ElementData: 'a,
+{
+    pub corpus: &'a Corpus,
+    pub index: I,
+    pub element: &'a I::ElementData,
 }
 
 /// Get index for an element (if indexed)
@@ -448,10 +474,10 @@ impl<'d> Deserialize<'d> for Corpus {
  */
 pub mod prelude {
     pub use super::Corpus;
-    pub use super::{ObjectIndex, NounIndex, VerbIndex, SentenceIndex};
+    pub use super::{NounIndex, ObjectIndex, SentenceIndex, VerbIndex};
 
     // Traits
-    pub use super::{CorpusElementIndex,ElementForIndex,IndexForElement};
+    pub use super::{CorpusElementIndex, ElementForIndex, IndexForElement};
 }
 
 /******************************************************************************

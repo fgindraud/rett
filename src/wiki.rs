@@ -40,7 +40,7 @@ mod database {
     }
     impl<'a> Deref for DatabaseWriteLock<'a> {
         type Target = Corpus;
-        fn deref(&self) -> &Corpus{
+        fn deref(&self) -> &Corpus {
             &self.lock
         }
     }
@@ -64,19 +64,6 @@ use std::path::Path;
 /******************************************************************************
  * HTTP server.
  */
-
-fn page_or_404<I, F> (corpus: &Corpus, i: I, f: F) -> Response
-where
-    I : CorpusElementIndex + Copy,
-    F: FnOnce (&Corpus, I) -> Response 
-{
-    if corpus.valid(i) {
-        f(corpus, i)
-    } else {
-        Response::empty_404()
-    }
-}
-
 pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
     let db = database::Database::from_file(file);
     eprintln!("Wiki starting on {}", addr);
@@ -87,7 +74,10 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
 //            (GET) ["/all"] => { page_all_objects(&db.access()) },
             // Objects by id
             (GET) ["/object/{id}", id: usize] => {
-                page_or_404(&db.access(), ObjectIndex::new(id), display_object_page)
+                match db.access().get_ref(ObjectIndex::new(id)) {
+                    Ok(r) => display_object_page(r),
+                    _ => Response::empty_404()
+                }
             },
             // Create elements (raw)
 //            (GET) ["/create/atom"] => { page_create_atom() },
@@ -125,35 +115,35 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
  * TODO improve node selection system
  */
 
-fn object_url (id: ObjectIndex) -> String {
+fn object_url(id: ObjectIndex) -> String {
     format!("/object/{}", id.to_raw_index())
 }
-fn noun_url (id: NounIndex) -> String {
+fn noun_url(id: NounIndex) -> String {
     format!("/noun/{}", id.to_raw_index())
 }
-fn verb_url (id: VerbIndex) -> String {
+fn verb_url(id: VerbIndex) -> String {
     format!("/verb/{}", id.to_raw_index())
 }
-fn sentence_url (id: SentenceIndex) -> String {
+fn sentence_url(id: SentenceIndex) -> String {
     format!("/sentence/{}", id.to_raw_index())
 }
 
-fn object_name (id: ObjectIndex) -> String {
+fn object_name(id: ObjectIndex) -> String {
     format!("object {}", id.to_raw_index())
 }
-fn noun_name (id: NounIndex) -> String {
+fn noun_name(id: NounIndex) -> String {
     format!("/noun/{}", id.to_raw_index())
 }
-fn verb_name (id: VerbIndex) -> String {
+fn verb_name(id: VerbIndex) -> String {
     format!("/verb/{}", id.to_raw_index())
 }
-fn sentence_name (id: SentenceIndex) -> String {
+fn sentence_name(id: SentenceIndex) -> String {
     format!("/sentence/{}", id.to_raw_index())
 }
 
-fn display_object_page(corpus: &Corpus, id: ObjectIndex) -> Response {
-    let title = object_name(id);
-    wiki_page (title, html!{}, html!{})
+fn display_object_page<'a>(r: super::corpus::Ref<'a, ObjectIndex>) -> Response {
+    let title = object_name(r.index);
+    wiki_page(title, html!{}, html!{})
 }
 
 //// Elements associated to a type of objects are tagged with HTML classes. Get class name.
