@@ -57,6 +57,7 @@ mod database {
 }
 
 use corpus::prelude::*;
+use corpus::Ref;
 use horrorshow::{self, Render, RenderOnce, Template};
 use rouille::{self, Request, Response};
 use std::path::Path;
@@ -72,10 +73,28 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
             // Main page and special pages
 //            (GET) ["/"] => { main_page(&db.access()) },
 //            (GET) ["/all"] => { page_all_objects(&db.access()) },
-            // Objects by id
+            // Elements by id
             (GET) ["/object/{id}", id: usize] => {
                 match db.access().get_ref(ObjectIndex::new(id)) {
                     Ok(r) => display_object_page(r),
+                    _ => Response::empty_404()
+                }
+            },
+            (GET) ["/noun/{id}", id: usize] => {
+                match db.access().get_ref(NounIndex::new(id)) {
+                    Ok(r) => display_noun_page(r),
+                    _ => Response::empty_404()
+                }
+            },
+            (GET) ["/verb/{id}", id: usize] => {
+                match db.access().get_ref(VerbIndex::new(id)) {
+                    Ok(r) => display_verb_page(r),
+                    _ => Response::empty_404()
+                }
+            },
+            (GET) ["/sentence/{id}", id: usize] => {
+                match db.access().get_ref(SentenceIndex::new(id)) {
+                    Ok(r) => display_sentence_page(r),
                     _ => Response::empty_404()
                 }
             },
@@ -132,17 +151,29 @@ fn object_name(id: ObjectIndex) -> String {
     format!("object {}", id.to_raw_index())
 }
 fn noun_name(id: NounIndex) -> String {
-    format!("/noun/{}", id.to_raw_index())
+    format!("noun {}", id.to_raw_index())
 }
 fn verb_name(id: VerbIndex) -> String {
-    format!("/verb/{}", id.to_raw_index())
+    format!("verb {}", id.to_raw_index())
 }
 fn sentence_name(id: SentenceIndex) -> String {
-    format!("/sentence/{}", id.to_raw_index())
+    format!("sentence {}", id.to_raw_index())
 }
 
-fn display_object_page<'a>(r: super::corpus::Ref<'a, ObjectIndex>) -> Response {
+fn display_object_page<'a>(r: Ref<'a, ObjectIndex>) -> Response {
     let title = object_name(r.index);
+    wiki_page(title, html!{}, html!{})
+}
+fn display_noun_page<'a>(r: Ref<'a, NounIndex>) -> Response {
+    let title = noun_name(r.index);
+    wiki_page(title, html!{}, html!{})
+}
+fn display_verb_page<'a>(r: Ref<'a, VerbIndex>) -> Response {
+    let title = verb_name(r.index);
+    wiki_page(title, html!{}, html!{})
+}
+fn display_sentence_page<'a>(r: Ref<'a, SentenceIndex>) -> Response {
+    let title = sentence_name(r.index);
     wiki_page(title, html!{}, html!{})
 }
 
