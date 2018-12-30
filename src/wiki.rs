@@ -70,59 +70,59 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
     eprintln!("Wiki starting on {}", addr);
     rouille::start_server_with_pool(addr, Some(nb_threads), move |request| {
         router!(request,
-            // Main page and special pages
-//            (GET) ["/"] => { main_page(&db.access()) },
-//            (GET) ["/all"] => { page_all_objects(&db.access()) },
-            // Elements by id
-            (GET) ["/object/{id}", id: usize] => {
-                match db.access().get_ref(ObjectIndex::new(id)) {
-                    Ok(r) => display_object_page(r),
-                    _ => Response::empty_404()
-                }
-            },
-            (GET) ["/noun/{id}", id: usize] => {
-                match db.access().get_ref(NounIndex::new(id)) {
-                    Ok(r) => display_noun_page(r),
-                    _ => Response::empty_404()
-                }
-            },
-            (GET) ["/verb/{id}", id: usize] => {
-                match db.access().get_ref(VerbIndex::new(id)) {
-                    Ok(r) => display_verb_page(r),
-                    _ => Response::empty_404()
-                }
-            },
-            (GET) ["/sentence/{id}", id: usize] => {
-                match db.access().get_ref(SentenceIndex::new(id)) {
-                    Ok(r) => display_sentence_page(r),
-                    _ => Response::empty_404()
-                }
-            },
-            // Create elements (raw)
-//            (GET) ["/create/atom"] => { page_create_atom() },
-//            (POST) ["/create/atom"] => { post_create_atom(request, &mut db.modify()) },
-//            (GET) ["/create/abstract"] => { page_create_abstract() },
-//            (POST) ["/create/abstract"] => { post_create_abstract(request, &mut db.modify()) },
-//            (GET) ["/create/link/from/{id}", id: Index] => {
-//                match db.access ().get_object(id) {
-//                    Ok(object) => page_create_link(object, LinkSide::From),
-//                    _ => Response::empty_400(),
-//                }
-//            },
-//            (GET) ["/create/link/to/{id}", id: Index] => {
-//                match db.access ().get_object(id) {
-//                    Ok(object) => page_create_link(object, LinkSide::To),
-//                    _ => Response::empty_400(),
-//                }
-//            },
-//            (POST) ["/create/link"] => { post_create_link(request, &mut db.modify()) },
-//            // Contextual actions from overlays
-//            (POST) ["/edit/description"] => { post_edit_description(request, &mut db.modify()) },
-//            (POST) ["/remove"] => { post_remove(request, &mut db.modify()) },
-            // Assets
-            (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
-            _ => { Response::empty_404() }
-        )
+                    // Main page and special pages
+        //            (GET) ["/"] => { main_page(&db.access()) },
+        //            (GET) ["/all"] => { page_all_objects(&db.access()) },
+                    // Elements by id
+                    (GET) ["/object/{id}", id: usize] => {
+                        match db.access().get_ref(ObjectIndex::new(id)) {
+                            Ok(r) => display_object_page(r),
+                            _ => Response::empty_404()
+                        }
+                    },
+                    (GET) ["/noun/{id}", id: usize] => {
+                        match db.access().get_ref(NounIndex::new(id)) {
+                            Ok(r) => display_noun_page(r),
+                            _ => Response::empty_404()
+                        }
+                    },
+                    (GET) ["/verb/{id}", id: usize] => {
+                        match db.access().get_ref(VerbIndex::new(id)) {
+                            Ok(r) => display_verb_page(r),
+                            _ => Response::empty_404()
+                        }
+                    },
+                    (GET) ["/sentence/{id}", id: usize] => {
+                        match db.access().get_ref(SentenceIndex::new(id)) {
+                            Ok(r) => display_sentence_page(r),
+                            _ => Response::empty_404()
+                        }
+                    },
+                    // Create elements (raw)
+        //            (GET) ["/create/atom"] => { page_create_atom() },
+        //            (POST) ["/create/atom"] => { post_create_atom(request, &mut db.modify()) },
+        //            (GET) ["/create/abstract"] => { page_create_abstract() },
+        //            (POST) ["/create/abstract"] => { post_create_abstract(request, &mut db.modify()) },
+        //            (GET) ["/create/link/from/{id}", id: Index] => {
+        //                match db.access ().get_object(id) {
+        //                    Ok(object) => page_create_link(object, LinkSide::From),
+        //                    _ => Response::empty_400(),
+        //                }
+        //            },
+        //            (GET) ["/create/link/to/{id}", id: Index] => {
+        //                match db.access ().get_object(id) {
+        //                    Ok(object) => page_create_link(object, LinkSide::To),
+        //                    _ => Response::empty_400(),
+        //                }
+        //            },
+        //            (POST) ["/create/link"] => { post_create_link(request, &mut db.modify()) },
+        //            // Contextual actions from overlays
+        //            (POST) ["/edit/description"] => { post_edit_description(request, &mut db.modify()) },
+        //            (POST) ["/remove"] => { post_remove(request, &mut db.modify()) },
+                    // Assets
+                    (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
+                    _ => { Response::empty_404() }
+                )
     })
 }
 
@@ -162,19 +162,19 @@ fn sentence_name(id: SentenceIndex) -> String {
 
 fn display_object_page<'a>(r: Ref<'a, ObjectIndex>) -> Response {
     let title = object_name(r.index);
-    wiki_page(title, html!{}, html!{})
+    wiki_page(title, html! {}, html! {})
 }
 fn display_noun_page<'a>(r: Ref<'a, NounIndex>) -> Response {
     let title = noun_name(r.index);
-    wiki_page(title, html!{}, html!{})
+    wiki_page(title, html! {}, html! {})
 }
 fn display_verb_page<'a>(r: Ref<'a, VerbIndex>) -> Response {
     let title = verb_name(r.index);
-    wiki_page(title, html!{}, html!{})
+    wiki_page(title, html! {}, html! {})
 }
 fn display_sentence_page<'a>(r: Ref<'a, SentenceIndex>) -> Response {
     let title = sentence_name(r.index);
-    wiki_page(title, html!{}, html!{})
+    wiki_page(title, html! {}, html! {})
 }
 
 //// Elements associated to a type of objects are tagged with HTML classes. Get class name.

@@ -1,7 +1,9 @@
-use serde::{Deserialize, Deserializer};
 use std;
 use std::collections::HashMap;
+use std::default::Default;
 use std::fmt;
+use std::hash::Hash;
+use std::io;
 
 /// Error type for graph operations
 #[derive(Debug, Eq, PartialEq)]
@@ -17,27 +19,50 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
-// Index types
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct ObjectIndex(usize);
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct NounIndex(usize);
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct VerbIndex(usize);
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct SentenceIndex(usize);
+// Typed indexes: avoid confusion, but foes not hide impl.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct NameIndex(pub usize);
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ObjectIndex(pub usize);
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RelationIndex(pub usize);
 
-/// A single piece of text data, usable as a complement in a sentence.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct Noun(String);
-
-/// A verb used to link elements in a sentence. Can be "is" + adjective.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum Verb {
-    IsNamed,
-    Text(String),
+struct NameData {
+    name: String,
 }
 
+struct IndexableElement<Element, Data, Index>
+where
+    Element: Eq + Hash,
+{
+    elements: SlotVec<Data>,
+    indexes: HashMap<Element, Index>,
+}
+impl<E, D, I> Default for IndexableElement<E, D, I>
+where
+    E: Eq + Hash,
+{
+    // Derived Default trait would require Default impl for E,D,I which are not needed.
+    fn default() -> Self {
+        IndexableElement {
+            elements: SlotVec::default(),
+            indexes: HashMap::default(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Database {
+    names: IndexableElement<String, NameData, NameIndex>,
+}
+
+impl Database {
+    pub fn new() -> Database {
+        Self::default()
+    }
+}
+
+/*
 /// A sentence describes either an object, or another sentence (tagging).
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Subject {
@@ -59,45 +84,33 @@ pub struct Sentence {
 }
 
 // Store elements and back links
-#[derive(Serialize, Deserialize)]
 pub struct ObjectData {
     description: String,
-    #[serde(skip)]
     subject_of: Set<SentenceIndex>,
-    #[serde(skip)]
     complement_of: Set<SentenceIndex>,
 }
-#[derive(Serialize, Deserialize)]
 pub struct NounData {
     noun: Noun,
-    #[serde(skip)]
     complement_of: Set<SentenceIndex>,
 }
-#[derive(Serialize, Deserialize)]
 pub struct VerbData {
     verb: Verb,
-    #[serde(skip)]
     verb_of: Set<SentenceIndex>,
 }
-#[derive(Serialize, Deserialize)]
 pub struct SentenceData {
     sentence: Sentence,
-    #[serde(skip)]
     subject_of: Set<SentenceIndex>,
 }
 
 /// Relation graph as a corpus of sentences.
-#[derive(Default, Serialize)]
+#[derive(Default)]
 pub struct Corpus {
     objects: SlotVec<ObjectData>,
     nouns: SlotVec<NounData>,
     verbs: SlotVec<VerbData>,
     sentences: SlotVec<SentenceData>,
-    #[serde(skip)]
     noun_indexes: HashMap<Noun, NounIndex>,
-    #[serde(skip)]
     verb_indexes: HashMap<Verb, VerbIndex>,
-    #[serde(skip)]
     sentence_indexes: HashMap<Sentence, SentenceIndex>,
 }
 
@@ -298,13 +311,13 @@ impl Corpus {
         })
     }
 }
+*/
 
 /******************************************************************************
  * Utils.
  */
 
 /// Vector where elements never change indexes. Removal generate holes.
-#[derive(Serialize, Deserialize)]
 struct SlotVec<T> {
     inner: Vec<Option<T>>,
 }
@@ -392,13 +405,28 @@ impl<T: Ord> std::default::Default for Set<T> {
 }
 
 /******************************************************************************
- * IO using serde.
+ * Prelude for easy import.
+ */
+pub mod prelude {
+    pub use super::Database;
+    pub use super::{NameIndex, ObjectIndex, RelationIndex};
+}
+
+/******************************************************************************
+ * IO using serde. FIXME use simple text format.
  *
  * Serialized as multiple Vec<Opt<DataStruct>>.
  * Foreach DataStruct, only serialize the inner object (not the backlinks).
  * After a row of serialize + deserialize, indexes are conserved.
  */
+pub fn from_reader<R: io::Read>(reader: R) -> io::Result<Database> {
+    unimplemented!()
+}
+pub fn to_writer<W: io::Write>(writer: W, database: &Database) -> io::Result<()> {
+    unimplemented!()
+}
 
+/*
 #[derive(Deserialize)]
 struct NotValidatedCorpus {
     objects: SlotVec<ObjectData>,
@@ -469,123 +497,114 @@ impl<'d> Deserialize<'d> for Corpus {
     }
 }
 
-/******************************************************************************
- * Prelude for easy import.
- */
-pub mod prelude {
-    pub use super::Corpus;
-    pub use super::{NounIndex, ObjectIndex, SentenceIndex, VerbIndex};
-
-    // Traits
-    pub use super::{CorpusElementIndex, ElementForIndex, IndexForElement};
-}
 
 /******************************************************************************
  * Tests.
  */
 #[cfg(test)]
 mod tests {
-    use super::super::serde_json;
-    use super::*;
+use super::super::serde_json;
+use super::*;
 
-    #[test]
-    fn basic() {
-        let mut corpus = Corpus::new();
-        let name = Noun("Name".to_string());
-        let ni = corpus.insert_noun(name.clone());
-        let oi = corpus.create_object();
-        let vi = corpus.insert_verb(Verb::IsNamed);
-        let sentence = Sentence {
-            subject: Subject::Object(oi),
-            verb: vi,
-            complement: Complement::Noun(ni),
-        };
-        let si = corpus.insert_sentence(sentence.clone()).unwrap();
+#[test]
+fn basic() {
+let mut corpus = Corpus::new();
+let name = Noun("Name".to_string());
+let ni = corpus.insert_noun(name.clone());
+let oi = corpus.create_object();
+let vi = corpus.insert_verb(Verb::IsNamed);
+let sentence = Sentence {
+subject: Subject::Object(oi),
+verb: vi,
+complement: Complement::Noun(ni),
+};
+let si = corpus.insert_sentence(sentence.clone()).unwrap();
 
-        assert_eq!(Some(ni), corpus.index_of(&name));
-        assert_eq!(ni, corpus.insert_noun(name));
-        let name2 = Noun("name".to_string());
-        assert_eq!(None, corpus.index_of(&name2));
-        assert_ne!(ni, corpus.insert_noun(name2));
+assert_eq!(Some(ni), corpus.index_of(&name));
+assert_eq!(ni, corpus.insert_noun(name));
+let name2 = Noun("name".to_string());
+assert_eq!(None, corpus.index_of(&name2));
+assert_ne!(ni, corpus.insert_noun(name2));
 
-        assert_eq!(Some(vi), corpus.index_of(&Verb::IsNamed));
-        assert_eq!(vi, corpus.insert_verb(Verb::IsNamed));
-        let verb2 = Verb::Text("is named".to_string());
-        assert_eq!(None, corpus.index_of(&verb2));
-        assert_ne!(vi, corpus.insert_verb(verb2));
+assert_eq!(Some(vi), corpus.index_of(&Verb::IsNamed));
+assert_eq!(vi, corpus.insert_verb(Verb::IsNamed));
+let verb2 = Verb::Text("is named".to_string());
+assert_eq!(None, corpus.index_of(&verb2));
+assert_ne!(vi, corpus.insert_verb(verb2));
 
-        assert_eq!(Some(si), corpus.index_of(&sentence));
-        assert_eq!(Ok(si), corpus.insert_sentence(sentence));
-        let sentence2 = Sentence {
-            subject: Subject::Object(ObjectIndex(42)), // Bad index
-            verb: vi,
-            complement: Complement::Noun(ni),
-        };
-        assert_eq!(None, corpus.index_of(&sentence2));
-        assert_eq!(Err(Error::InvalidIndex), corpus.insert_sentence(sentence2));
-    }
-
-    #[test]
-    fn io() {
-        let mut corpus = Corpus::new();
-        let name = Noun("Name".to_string());
-        let ni = corpus.insert_noun(name.clone());
-        let oi = corpus.create_object();
-        let vi = corpus.insert_verb(Verb::IsNamed);
-        let sentence = Sentence {
-            subject: Subject::Object(oi),
-            verb: vi,
-            complement: Complement::Noun(ni),
-        };
-        let _si = corpus.insert_sentence(sentence.clone()).unwrap();
-
-        let serialized = serde_json::to_string(&corpus).expect("Serialization failure");
-        let deserialized: Corpus =
-            serde_json::from_str(&serialized).expect("Deserialization failure");
-
-        for i in 0..corpus.objects.inner.len() {
-            assert_eq!(
-                corpus.objects.get(i).map(|o| &o.description),
-                deserialized.objects.get(i).map(|o| &o.description)
-            );
-            assert_eq!(
-                corpus.objects.get(i).map(|o| &o.subject_of),
-                deserialized.objects.get(i).map(|o| &o.subject_of)
-            );
-            assert_eq!(
-                corpus.objects.get(i).map(|o| &o.complement_of),
-                deserialized.objects.get(i).map(|o| &o.complement_of)
-            );
-        }
-        for i in 0..corpus.nouns.inner.len() {
-            assert_eq!(
-                corpus.nouns.get(i).map(|n| &n.noun),
-                deserialized.nouns.get(i).map(|n| &n.noun)
-            );
-            assert_eq!(
-                corpus.nouns.get(i).map(|n| &n.complement_of),
-                deserialized.nouns.get(i).map(|n| &n.complement_of)
-            );
-        }
-        for i in 0..corpus.verbs.inner.len() {
-            assert_eq!(
-                corpus.verbs.get(i).map(|v| &v.verb),
-                deserialized.verbs.get(i).map(|v| &v.verb)
-            );
-            assert_eq!(
-                corpus.verbs.get(i).map(|v| &v.verb_of),
-                deserialized.verbs.get(i).map(|v| &v.verb_of)
-            );
-        }
-        for i in 0..corpus.sentences.inner.len() {
-            assert_eq!(
-                corpus.sentences.get(i).map(|s| &s.sentence),
-                deserialized.sentences.get(i).map(|s| &s.sentence)
-            );
-            assert_eq!(
-                corpus.sentences.get(i).map(|s| &s.subject_of),
-                deserialized.sentences.get(i).map(|s| &s.subject_of)
-            );
-        }
-    }
+assert_eq!(Some(si), corpus.index_of(&sentence));
+assert_eq!(Ok(si), corpus.insert_sentence(sentence));
+let sentence2 = Sentence {
+subject: Subject::Object(ObjectIndex(42)), // Bad index
+verb: vi,
+complement: Complement::Noun(ni),
+};
+assert_eq!(None, corpus.index_of(&sentence2));
+assert_eq!(Err(Error::InvalidIndex), corpus.insert_sentence(sentence2));
 }
+
+#[test]
+fn io() {
+let mut corpus = Corpus::new();
+let name = Noun("Name".to_string());
+let ni = corpus.insert_noun(name.clone());
+let oi = corpus.create_object();
+let vi = corpus.insert_verb(Verb::IsNamed);
+let sentence = Sentence {
+subject: Subject::Object(oi),
+verb: vi,
+complement: Complement::Noun(ni),
+};
+let _si = corpus.insert_sentence(sentence.clone()).unwrap();
+
+let serialized = serde_json::to_string(&corpus).expect("Serialization failure");
+let deserialized: Corpus =
+serde_json::from_str(&serialized).expect("Deserialization failure");
+
+for i in 0..corpus.objects.inner.len() {
+assert_eq!(
+corpus.objects.get(i).map(|o| &o.description),
+deserialized.objects.get(i).map(|o| &o.description)
+);
+assert_eq!(
+corpus.objects.get(i).map(|o| &o.subject_of),
+deserialized.objects.get(i).map(|o| &o.subject_of)
+);
+assert_eq!(
+corpus.objects.get(i).map(|o| &o.complement_of),
+deserialized.objects.get(i).map(|o| &o.complement_of)
+);
+}
+for i in 0..corpus.nouns.inner.len() {
+assert_eq!(
+corpus.nouns.get(i).map(|n| &n.noun),
+deserialized.nouns.get(i).map(|n| &n.noun)
+);
+assert_eq!(
+corpus.nouns.get(i).map(|n| &n.complement_of),
+deserialized.nouns.get(i).map(|n| &n.complement_of)
+);
+}
+for i in 0..corpus.verbs.inner.len() {
+assert_eq!(
+corpus.verbs.get(i).map(|v| &v.verb),
+deserialized.verbs.get(i).map(|v| &v.verb)
+);
+assert_eq!(
+corpus.verbs.get(i).map(|v| &v.verb_of),
+deserialized.verbs.get(i).map(|v| &v.verb_of)
+);
+}
+for i in 0..corpus.sentences.inner.len() {
+assert_eq!(
+corpus.sentences.get(i).map(|s| &s.sentence),
+deserialized.sentences.get(i).map(|s| &s.sentence)
+);
+assert_eq!(
+corpus.sentences.get(i).map(|s| &s.subject_of),
+deserialized.sentences.get(i).map(|s| &s.subject_of)
+);
+}
+}
+}
+*/

@@ -1,9 +1,3 @@
-// Graph IO
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-
 // Wiki
 #[macro_use]
 extern crate rouille; // Simple http server
@@ -16,45 +10,46 @@ extern crate rust_embed; // Embed files in executable
 extern crate clap; // Command line parser
 
 /// Knowledge database as a set of sentences.
-mod corpus;
-use corpus::Corpus;
+mod relations;
+use relations::Database;
 
 /// Wiki interface
-mod wiki;
-
+//mod wiki;
 use std::fs::File;
 use std::path::Path;
 
-fn read_corpus_from_file(filename: &Path) -> Corpus {
+fn read_database_from_file(filename: &Path) -> Database {
     match File::open(filename) {
-        Ok(file) => match serde_json::from_reader(file) {
-            Ok(corpus) => return corpus,
+        Ok(file) => match relations::from_reader(file) {
+            Ok(database) => return database,
             Err(e) => eprintln!(
-                "Warning: invalid corpus format in file {}: {}",
+                "Warning: invalid database format in file {}: {}",
                 filename.display(),
                 e
             ),
         },
         Err(e) => eprintln!(
-            "Warning: cannot read corpus from {}: {}",
+            "Warning: cannot read database from {}: {}",
             filename.display(),
             e
         ),
     }
-    eprintln!("Using empty corpus");
-    Corpus::new()
+    eprintln!("Using empty database");
+    Database::new()
 }
-fn write_corpus_to_file(filename: &Path, corpus: &Corpus) {
+fn write_database_to_file(filename: &Path, database: &Database) {
     match File::create(filename) {
-        Ok(file) => if let Err(e) = serde_json::to_writer(file, corpus) {
-            eprintln!(
-                "Warning: cannot write corpus to {}: {}",
-                filename.display(),
-                e
-            )
-        },
+        Ok(file) => {
+            if let Err(e) = relations::to_writer(file, database) {
+                eprintln!(
+                    "Warning: cannot write database to {}: {}",
+                    filename.display(),
+                    e
+                )
+            }
+        }
         Err(e) => eprintln!(
-            "Warning: cannot write corpus to {}: {}",
+            "Warning: cannot write database to {}: {}",
             filename.display(),
             e
         ),
@@ -67,13 +62,13 @@ fn main() {
         .setting(AppSettings::VersionlessSubcommands)
         .setting(AppSettings::SubcommandRequired)
         .arg(
-            Arg::with_name("corpus_file")
-                .help("Path to corpus file")
+            Arg::with_name("database_file")
+                .help("Path to database file")
                 .required(true),
         )
         .subcommand(
             SubCommand::with_name("wiki")
-                .about("Run a server with a wiki-like interface to the corpus")
+                .about("Run a server with a wiki-like interface to the database")
                 .arg(
                     Arg::with_name("addr")
                         .help("Address on which the server will bind")
@@ -92,17 +87,18 @@ fn main() {
 
     // TODO useful tooling: merge of files
 
-    let corpus_filepath = Path::new(matches.value_of_os("corpus_file").unwrap());
+    let database_filepath = Path::new(matches.value_of_os("database_file").unwrap());
 
     match matches.subcommand() {
         ("wiki", Some(args)) => {
             let addr = args.value_of("addr").unwrap();
-            let nb_threads = args
+            let nb_threads: i32 = args
                 .value_of("nb_threads")
                 .unwrap()
                 .parse()
                 .expect("nb_threads: usize");
-            wiki::run(addr, corpus_filepath, nb_threads)
+            ()
+            //wiki::run(addr, database_filepath, nb_threads)
         }
         _ => panic!("Missing subcommand"),
     }
