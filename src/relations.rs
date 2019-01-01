@@ -19,33 +19,53 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
-// Typed indexes: avoid confusion, but foes not hide impl.
+/// All database entities are references by typed indexes.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum Entity {
+    Concrete(AtomIndex),
+    Abstract(ObjectIndex),
+    Relation(RelationIndex),
+}
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NameIndex(pub usize);
+pub struct AtomIndex(pub usize);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ObjectIndex(pub usize);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RelationIndex(pub usize);
 
-struct NameData {
-    name: String,
+/// Abtract object, not self contained, described by its relations.
+struct Object;
+
+/// Atom of data that is known, self contained, indexable.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum Atom {
+    Text(String),
 }
 
-struct IndexableElement<Element, Data, Index>
-where
-    Element: Eq + Hash,
-{
-    elements: SlotVec<Data>,
-    indexes: HashMap<Element, Index>,
+/// Binary relation between two entities, tagged by a third one.
+/// If the second entity is omitted, this is a simple description.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct Relation {
+    subject: Entity,
+    descriptor: Entity,
+    complement: Option<Entity>,
 }
-impl<E, D, I> Default for IndexableElement<E, D, I>
-where
-    E: Eq + Hash,
-{
+
+struct EntityData<E> {
+    entity: E,
+    subject_of: Set<RelationIndex>,
+    descriptor_of: Set<RelationIndex>,
+    complement_of: Set<RelationIndex>,
+}
+struct IndexableEntity<EntityType: Eq + Hash, Index> {
+    entities: SlotVec<EntityData<EntityType>>,
+    indexes: HashMap<EntityType, Index>,
+}
+impl<E: Eq + Hash, I> Default for IndexableEntity<E, I> {
     // Derived Default trait would require Default impl for E,D,I which are not needed.
     fn default() -> Self {
-        IndexableElement {
-            elements: SlotVec::default(),
+        IndexableEntity {
+            entities: SlotVec::default(),
             indexes: HashMap::default(),
         }
     }
@@ -53,136 +73,88 @@ where
 
 #[derive(Default)]
 pub struct Database {
-    names: IndexableElement<String, NameData, NameIndex>,
+    objects: SlotVec<EntityData<Object>>,
+    atoms: IndexableEntity<Atom, AtomIndex>,
+    relations: IndexableEntity<Relation, RelationIndex>,
 }
 
 impl Database {
     pub fn new() -> Database {
         Self::default()
     }
+
+    // Add new entities to the database.
+    pub fn create_object(&mut self) -> ObjectIndex {
+        ObjectIndex(add_new_entity_to_data_vec(&mut self.objects, Object {}))
+    }
+    pub fn insert_atom(&mut self, atom: Atom) -> AtomIndex {
+        match self.index_of_atom(&atom) {
+            Some(index) => index,
+            None => {
+                let index = add_new_entity_to_data_vec(&mut self.atoms.entities, atom.clone());
+                let index = AtomIndex(index);
+                self.atoms.indexes.insert(atom, index);
+                index
+            }
+        }
+    }
+    pub fn insert_relation(&mut self, relation: Relation) -> Result<RelationIndex, Error> {
+        let all_indexes_valid = {
+            let is_valid = |e: &Entity| match *e {
+                Entity::Concrete(a) => self.atom(a).is_ok(),
+                Entity::Abstract(o) => self.object(o).is_ok(),
+                Entity::Relation(r) => self.relation(r).is_ok(),
+            };
+            is_valid(&relation.subject)
+                && is_valid(&relation.descriptor)
+                && relation.complement.as_ref().map_or(true, is_valid)
+        };
+        if !all_indexes_valid {
+            return Err(Error::InvalidIndex);
+        }
+        Ok(match self.index_of_relation(&relation) {
+            Some(index) => index,
+            None => {
+                let index =
+                    add_new_entity_to_data_vec(&mut self.relations.entities, relation.clone());
+                let index = RelationIndex(index);
+                // FIXME register in subject_of/... fields
+                self.relations.indexes.insert(relation, index);
+                index
+            }
+        })
+    }
+
+    // Temporary accessors (FIXME use fat ref)
+    pub fn object(&self, i: ObjectIndex) -> Result<&Object, Error> {
+        self.objects.get(i.0).map(|d| &d.entity)
+    }
+    pub fn atom(&self, i: AtomIndex) -> Result<&Atom, Error> {
+        self.atoms.entities.get(i.0).map(|d| &d.entity)
+    }
+    pub fn relation(&self, i: RelationIndex) -> Result<&Relation, Error> {
+        self.relations.entities.get(i.0).map(|d| &d.entity)
+    }
+
+    // Retrieve index of indexable entities.
+    pub fn index_of_atom(&self, atom: &Atom) -> Option<AtomIndex> {
+        self.atoms.indexes.get(atom).cloned()
+    }
+    pub fn index_of_relation(&self, relation: &Relation) -> Option<RelationIndex> {
+        self.relations.indexes.get(relation).cloned()
+    }
+}
+
+fn add_new_entity_to_data_vec<E>(v: &mut SlotVec<EntityData<E>>, e: E) -> usize {
+    v.insert(EntityData {
+        entity: e,
+        subject_of: Set::new(),
+        descriptor_of: Set::new(),
+        complement_of: Set::new(),
+    })
 }
 
 /*
-/// A sentence describes either an object, or another sentence (tagging).
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum Subject {
-    Object(ObjectIndex),
-    Sentence(SentenceIndex),
-}
-/// Additional description element.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum Complement {
-    None,
-    Noun(NounIndex),
-    Object(ObjectIndex),
-}
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct Sentence {
-    subject: Subject,
-    verb: VerbIndex,
-    complement: Complement,
-}
-
-// Store elements and back links
-pub struct ObjectData {
-    description: String,
-    subject_of: Set<SentenceIndex>,
-    complement_of: Set<SentenceIndex>,
-}
-pub struct NounData {
-    noun: Noun,
-    complement_of: Set<SentenceIndex>,
-}
-pub struct VerbData {
-    verb: Verb,
-    verb_of: Set<SentenceIndex>,
-}
-pub struct SentenceData {
-    sentence: Sentence,
-    subject_of: Set<SentenceIndex>,
-}
-
-/// Relation graph as a corpus of sentences.
-#[derive(Default)]
-pub struct Corpus {
-    objects: SlotVec<ObjectData>,
-    nouns: SlotVec<NounData>,
-    verbs: SlotVec<VerbData>,
-    sentences: SlotVec<SentenceData>,
-    noun_indexes: HashMap<Noun, NounIndex>,
-    verb_indexes: HashMap<Verb, VerbIndex>,
-    sentence_indexes: HashMap<Sentence, SentenceIndex>,
-}
-
-/// Basic methods for an index type of the corpus.
-pub trait CorpusElementIndex {
-    type ElementData;
-    fn new(raw_index: usize) -> Self;
-    fn to_raw_index(&self) -> usize;
-    // Used to enable ElementForIndex<I> automatic implementation
-    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error>;
-}
-impl CorpusElementIndex for ObjectIndex {
-    type ElementData = ObjectData;
-    fn new(i: usize) -> Self {
-        ObjectIndex(i)
-    }
-    fn to_raw_index(&self) -> usize {
-        self.0
-    }
-    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error> {
-        corpus.objects.get(self.to_raw_index())
-    }
-}
-impl CorpusElementIndex for NounIndex {
-    type ElementData = NounData;
-    fn new(i: usize) -> Self {
-        NounIndex(i)
-    }
-    fn to_raw_index(&self) -> usize {
-        self.0
-    }
-    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error> {
-        corpus.nouns.get(self.to_raw_index())
-    }
-}
-impl CorpusElementIndex for VerbIndex {
-    type ElementData = VerbData;
-    fn new(i: usize) -> Self {
-        VerbIndex(i)
-    }
-    fn to_raw_index(&self) -> usize {
-        self.0
-    }
-    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error> {
-        corpus.verbs.get(self.to_raw_index())
-    }
-}
-impl CorpusElementIndex for SentenceIndex {
-    type ElementData = SentenceData;
-    fn new(i: usize) -> Self {
-        SentenceIndex(i)
-    }
-    fn to_raw_index(&self) -> usize {
-        self.0
-    }
-    fn get_element<'a>(&self, corpus: &'a Corpus) -> Result<&'a Self::ElementData, Error> {
-        corpus.sentences.get(self.to_raw_index())
-    }
-}
-
-/// Access elements by index, for multiple index types.
-pub trait ElementForIndex<I: CorpusElementIndex> {
-    fn get(&self, i: I) -> Result<&I::ElementData, Error>;
-    fn valid(&self, i: I) -> bool {
-        self.get(i).is_ok()
-    }
-    fn get_ref(&self, i: I) -> Result<Ref<I>, Error>;
-}
-impl<I: CorpusElementIndex + Clone> ElementForIndex<I> for Corpus {
-    fn get(&self, i: I) -> Result<&I::ElementData, Error> {
-        i.get_element(self)
-    }
     fn get_ref(&self, i: I) -> Result<Ref<I>, Error> {
         self.get(i.clone()).map(|e| Ref {
             corpus: self,
@@ -190,14 +162,6 @@ impl<I: CorpusElementIndex + Clone> ElementForIndex<I> for Corpus {
             element: e,
         })
     }
-}
-impl<I: CorpusElementIndex + Clone> std::ops::Index<I> for Corpus {
-    type Output = I::ElementData;
-    fn index(&self, i: I) -> &Self::Output {
-        self.get(i).unwrap()
-    }
-}
-// TODO add api
 pub struct Ref<'a, I>
 where
     I: CorpusElementIndex,
@@ -208,85 +172,6 @@ where
     pub element: &'a I::ElementData,
 }
 
-/// Get index for an element (if indexed)
-pub trait IndexForElement<E> {
-    type Index;
-    fn index_of(&self, e: &E) -> Option<Self::Index>;
-}
-impl IndexForElement<Noun> for Corpus {
-    type Index = NounIndex;
-    fn index_of(&self, n: &Noun) -> Option<Self::Index> {
-        self.noun_indexes.get(n).cloned()
-    }
-}
-impl IndexForElement<Verb> for Corpus {
-    type Index = VerbIndex;
-    fn index_of(&self, v: &Verb) -> Option<Self::Index> {
-        self.verb_indexes.get(v).cloned()
-    }
-}
-impl IndexForElement<Sentence> for Corpus {
-    type Index = SentenceIndex;
-    fn index_of(&self, s: &Sentence) -> Option<Self::Index> {
-        self.sentence_indexes.get(s).cloned()
-    }
-}
-
-impl Corpus {
-    /// Create an empty Corpus.
-    pub fn new() -> Corpus {
-        Corpus::default()
-    }
-
-    pub fn create_object(&mut self) -> ObjectIndex {
-        let d = ObjectData {
-            description: String::new(),
-            subject_of: Set::new(),
-            complement_of: Set::new(),
-        };
-        ObjectIndex(self.objects.insert(d))
-    }
-    pub fn insert_noun(&mut self, n: Noun) -> NounIndex {
-        match self.index_of(&n) {
-            Some(index) => index,
-            None => {
-                let d = NounData {
-                    noun: n.clone(),
-                    complement_of: Set::new(),
-                };
-                let new_index = NounIndex(self.nouns.insert(d));
-                self.noun_indexes.insert(n, new_index);
-                new_index
-            }
-        }
-    }
-    pub fn insert_verb(&mut self, v: Verb) -> VerbIndex {
-        match self.index_of(&v) {
-            Some(index) => index,
-            None => {
-                let d = VerbData {
-                    verb: v.clone(),
-                    verb_of: Set::new(),
-                };
-                let new_index = VerbIndex(self.verbs.insert(d));
-                self.verb_indexes.insert(v, new_index);
-                new_index
-            }
-        }
-    }
-    pub fn insert_sentence(&mut self, s: Sentence) -> Result<SentenceIndex, Error> {
-        let subject_valid = match s.subject {
-            Subject::Object(o) => self.valid(o),
-            Subject::Sentence(s) => self.valid(s),
-        };
-        let complement_valid = match s.complement {
-            Complement::None => true,
-            Complement::Noun(n) => self.valid(n),
-            Complement::Object(o) => self.valid(o),
-        };
-        if !(subject_valid && self.valid(s.verb) && complement_valid) {
-            return Err(Error::InvalidIndex);
-        }
         Ok(match self.index_of(&s) {
             Some(index) => index,
             None => {
@@ -409,7 +294,7 @@ impl<T: Ord> std::default::Default for Set<T> {
  */
 pub mod prelude {
     pub use super::Database;
-    pub use super::{NameIndex, ObjectIndex, RelationIndex};
+    pub use super::{AtomIndex, ObjectIndex, RelationIndex};
 }
 
 /******************************************************************************
