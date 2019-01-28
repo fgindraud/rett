@@ -1,6 +1,5 @@
 use std;
 use std::collections::HashMap;
-use std::default::Default;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
@@ -19,95 +18,80 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
-/// All database entities are references by typed indexes.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum Entity {
-    Concrete(AtomIndex),
-    Abstract(ObjectIndex),
-    Relation(RelationIndex),
-}
+/// All database elements are referenced by an index, and share the same index space.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct AtomIndex(pub usize);
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ObjectIndex(pub usize);
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct RelationIndex(pub usize);
+pub struct Index(pub usize);
 
-/// Abtract object, not self contained, described by its relations.
-struct Object;
-
-/// Atom of data that is known, self contained, indexable.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Atom {
     Text(String),
 }
-
-/// Binary relation between two entities, tagged by a third one.
-/// If the second entity is omitted, this is a simple description.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Relation {
-    subject: Entity,
-    descriptor: Entity,
-    complement: Option<Entity>,
+    subject: Index,
+    descriptor: Index,
+    complement: Option<Index>,
 }
 
-struct EntityData<E> {
-    entity: E,
-    subject_of: Set<RelationIndex>,
-    descriptor_of: Set<RelationIndex>,
-    complement_of: Set<RelationIndex>,
+enum Element {
+    /// Abtract object, not self contained, described by its relations.
+    Abstract,
+    /// Atom of data that is known, self contained, indexable.
+    Concrete(Atom),
+    /// Binary relation between any two elements, tagged by a third one.
+    /// If the second entity is omitted, this is a simple description.
+    Relation(Relation),
 }
-struct IndexableEntity<EntityType: Eq + Hash, Index> {
-    entities: SlotVec<EntityData<EntityType>>,
-    indexes: HashMap<EntityType, Index>,
-}
-impl<E: Eq + Hash, I> Default for IndexableEntity<E, I> {
-    // Derived Default trait would require Default impl for E,D,I which are not needed.
-    fn default() -> Self {
-        IndexableEntity {
-            entities: SlotVec::default(),
-            indexes: HashMap::default(),
-        }
-    }
+struct ElementData {
+    value: Element,
+    // All indexes are from Relations
+    subject_of: Set<Index>,
+    descriptor_of: Set<Index>,
+    complement_of: Set<Index>,
 }
 
-#[derive(Default)]
 pub struct Database {
-    objects: SlotVec<EntityData<Object>>,
-    atoms: IndexableEntity<Atom, AtomIndex>,
-    relations: IndexableEntity<Relation, RelationIndex>,
+    elements: SlotVec<ElementData>,
+    index_of_atoms: HashMap<Atom, Index>,
+    index_of_relations: HashMap<Relation, Index>,
 }
 
 impl Database {
     pub fn new() -> Database {
-        Self::default()
+        Database {
+            elements: SlotVec::new(),
+            index_of_atoms: HashMap::new(),
+            index_of_relations: HashMap::new(),
+        }
     }
 
     // Add new entities to the database.
-    pub fn create_object(&mut self) -> ObjectIndex {
-        ObjectIndex(add_new_entity_to_data_vec(&mut self.objects, Object {}))
+    pub fn create_abstract_element(&mut self) -> Index {
+        Index(add_new_element_to_data_vec(
+            &mut self.elements,
+            Element::Abstract,
+        ))
     }
-    pub fn insert_atom(&mut self, atom: Atom) -> AtomIndex {
+    pub fn insert_atom(&mut self, atom: Atom) -> Index {
         match self.index_of_atom(&atom) {
             Some(index) => index,
             None => {
-                let index = add_new_entity_to_data_vec(&mut self.atoms.entities, atom.clone());
-                let index = AtomIndex(index);
-                self.atoms.indexes.insert(atom, index);
+                let index = add_new_element_to_data_vec(
+                    &mut self.elements,
+                    Element::Concrete(atom.clone()),
+                );
+                let index = Index(index);
+                self.index_of_atoms.insert(atom, index);
                 index
             }
         }
     }
-    pub fn insert_relation(&mut self, relation: Relation) -> Result<RelationIndex, Error> {
+    pub fn insert_relation(&mut self, relation: Relation) -> Result<Index, Error> {
         let all_indexes_valid = {
-            let is_valid = |e: &Entity| match *e {
-                Entity::Concrete(a) => self.atom(a).is_ok(),
-                Entity::Abstract(o) => self.object(o).is_ok(),
-                Entity::Relation(r) => self.relation(r).is_ok(),
-            };
-            is_valid(&relation.subject)
-                && is_valid(&relation.descriptor)
-                && relation.complement.as_ref().map_or(true, is_valid)
+            let is_valid = |i: Index| self.elements.get(i.0).is_ok();
+            is_valid(relation.subject)
+                && is_valid(relation.descriptor)
+                && relation.complement.map_or(true, is_valid)
         };
         if !all_indexes_valid {
             return Err(Error::InvalidIndex);
@@ -115,39 +99,35 @@ impl Database {
         Ok(match self.index_of_relation(&relation) {
             Some(index) => index,
             None => {
-                let index =
-                    add_new_entity_to_data_vec(&mut self.relations.entities, relation.clone());
-                let index = RelationIndex(index);
+                let index = add_new_element_to_data_vec(
+                    &mut self.elements,
+                    Element::Relation(relation.clone()),
+                );
+                let index = Index(index);
                 // FIXME register in subject_of/... fields
-                self.relations.indexes.insert(relation, index);
+                self.index_of_relations.insert(relation, index);
                 index
             }
         })
     }
 
     // Temporary accessors (FIXME use fat ref)
-    pub fn object(&self, i: ObjectIndex) -> Result<&Object, Error> {
-        self.objects.get(i.0).map(|d| &d.entity)
-    }
-    pub fn atom(&self, i: AtomIndex) -> Result<&Atom, Error> {
-        self.atoms.entities.get(i.0).map(|d| &d.entity)
-    }
-    pub fn relation(&self, i: RelationIndex) -> Result<&Relation, Error> {
-        self.relations.entities.get(i.0).map(|d| &d.entity)
+    pub fn element(&self, i: Index) -> Result<&Element, Error> {
+        self.elements.get(i.0).map(|d| &d.value)
     }
 
     // Retrieve index of indexable entities.
-    pub fn index_of_atom(&self, atom: &Atom) -> Option<AtomIndex> {
-        self.atoms.indexes.get(atom).cloned()
+    pub fn index_of_atom(&self, atom: &Atom) -> Option<Index> {
+        self.index_of_atoms.get(atom).cloned()
     }
-    pub fn index_of_relation(&self, relation: &Relation) -> Option<RelationIndex> {
-        self.relations.indexes.get(relation).cloned()
+    pub fn index_of_relation(&self, relation: &Relation) -> Option<Index> {
+        self.index_of_relations.get(relation).cloned()
     }
 }
 
-fn add_new_entity_to_data_vec<E>(v: &mut SlotVec<EntityData<E>>, e: E) -> usize {
-    v.insert(EntityData {
-        entity: e,
+fn add_new_element_to_data_vec(v: &mut SlotVec<ElementData>, e: Element) -> usize {
+    v.insert(ElementData {
+        value: e,
         subject_of: Set::new(),
         descriptor_of: Set::new(),
         complement_of: Set::new(),
@@ -248,11 +228,6 @@ impl<T> std::ops::IndexMut<usize> for SlotVec<T> {
         self.get_mut(i).unwrap()
     }
 }
-impl<T> std::default::Default for SlotVec<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// Vector with sorted elements and set api.
 #[derive(Debug, PartialEq, Eq)]
@@ -283,18 +258,13 @@ impl<T: Ord> std::ops::Deref for Set<T> {
         self.inner.deref()
     }
 }
-impl<T: Ord> std::default::Default for Set<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /******************************************************************************
  * Prelude for easy import.
  */
 pub mod prelude {
     pub use super::Database;
-    pub use super::{AtomIndex, ObjectIndex, RelationIndex};
+    pub use super::Index;
 }
 
 /******************************************************************************
