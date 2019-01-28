@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
+use std::marker::PhantomData;
 
 /// Error type for graph operations
 #[derive(Debug, Eq, PartialEq)]
@@ -22,10 +23,17 @@ impl std::error::Error for Error {}
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Index(pub usize);
 
+/// Abtract object, not self contained, described by its relations.
+pub struct Object;
+
+/// Atom of data that is known, self contained, indexable.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Atom {
     Text(String),
 }
+
+/// Binary relation between any two elements, tagged by a third one.
+/// If the second entity is omitted, this is a simple description.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Relation {
     subject: Index,
@@ -33,13 +41,9 @@ pub struct Relation {
     complement: Option<Index>,
 }
 
-enum Element {
-    /// Abtract object, not self contained, described by its relations.
+pub enum Element {
     Abstract,
-    /// Atom of data that is known, self contained, indexable.
     Concrete(Atom),
-    /// Binary relation between any two elements, tagged by a third one.
-    /// If the second entity is omitted, this is a simple description.
     Relation(Relation),
 }
 struct ElementData {
@@ -104,16 +108,22 @@ impl Database {
                     Element::Relation(relation.clone()),
                 );
                 let index = Index(index);
-                // FIXME register in subject_of/... fields
+                self.elements[relation.subject.0].subject_of.insert(index);
+                self.elements[relation.descriptor.0]
+                    .descriptor_of
+                    .insert(index);
+                if let Some(i) = relation.complement {
+                    self.elements[i.0].complement_of.insert(index)
+                }
+                self.elements[relation.subject.0].subject_of.insert(index);
                 self.index_of_relations.insert(relation, index);
                 index
             }
         })
     }
 
-    // Temporary accessors (FIXME use fat ref)
-    pub fn element(&self, i: Index) -> Result<&Element, Error> {
-        self.elements.get(i.0).map(|d| &d.value)
+    pub fn element(&self, i: Index) -> Result<Ref<Element>, Error> {
+        self.elements.get(i.0).map(|_| Ref::new(self, i))
     }
 
     // Retrieve index of indexable entities.
@@ -134,49 +144,96 @@ fn add_new_element_to_data_vec(v: &mut SlotVec<ElementData>, e: Element) -> usiz
     })
 }
 
-/*
-    fn get_ref(&self, i: I) -> Result<Ref<I>, Error> {
-        self.get(i.clone()).map(|e| Ref {
-            corpus: self,
-            index: i,
-            element: e,
-        })
-    }
-pub struct Ref<'a, I>
-where
-    I: CorpusElementIndex,
-    I::ElementData: 'a,
-{
-    pub corpus: &'a Corpus,
-    pub index: I,
-    pub element: &'a I::ElementData,
+/// A Ref<'a, E> is a valid index into the database to an "element of type E".
+/// If E is Atom/Object/Relation, this is a ref to the specific variant.
+/// If E is Element, this is a ref to any type (but still valid index).
+pub struct Ref<'a, ElementType> {
+    database: &'a Database,
+    index: Index,
+    marker: PhantomData<&'a ElementType>,
+}
+/// Wrap a Set<Index> so that it returns Ref<Relation> instead.
+pub struct RelationRefSet<'a> {
+    database: &'a Database,
+    set: &'a Set<Index>,
+}
+/// Enum of ref structs, to perform exploration.
+pub enum ElementRef<'a> {
+    Abstract(Ref<'a, Object>),
+    Concrete(Ref<'a, Atom>),
+    Relation(Ref<'a, Relation>),
 }
 
-        Ok(match self.index_of(&s) {
-            Some(index) => index,
-            None => {
-                let d = SentenceData {
-                    sentence: s.clone(),
-                    subject_of: Set::new(),
-                };
-                let new_index = SentenceIndex(self.sentences.insert(d));
-                match s.subject {
-                    Subject::Object(o) => self.objects[o.0].subject_of.insert(new_index),
-                    Subject::Sentence(s) => self.sentences[s.0].subject_of.insert(new_index),
-                }
-                self.verbs[s.verb.0].verb_of.insert(new_index);
-                match s.complement {
-                    Complement::None => (),
-                    Complement::Noun(n) => self.nouns[n.0].complement_of.insert(new_index),
-                    Complement::Object(o) => self.objects[o.0].complement_of.insert(new_index),
-                }
-                self.sentence_indexes.insert(s, new_index);
-                new_index
-            }
-        })
+impl<'a, E> Ref<'a, E> {
+    fn new(db: &'a Database, i: Index) -> Self {
+        Self {
+            database: db,
+            index: i,
+            marker: PhantomData,
+        }
+    }
+    pub fn database(&self) -> &Database {
+        self.database
+    }
+    pub fn index(&self) -> Index {
+        self.index
+    }
+    pub fn subject_of(&self) -> RelationRefSet<'a> {
+        RelationRefSet::new(self.database, &self.data().subject_of)
+    }
+    pub fn descriptor_of(&self) -> RelationRefSet<'a> {
+        RelationRefSet::new(self.database, &self.data().descriptor_of)
+    }
+    pub fn complement_of(&self) -> RelationRefSet<'a> {
+        RelationRefSet::new(self.database, &self.data().complement_of)
+    }
+    fn data(&self) -> &'a ElementData {
+        &self.database.elements[self.index.0]
     }
 }
-*/
+impl<'a> Ref<'a, Element> {
+    pub fn cases(&self) -> ElementRef<'a> {
+        match self.data().value {
+            Element::Abstract => ElementRef::Abstract(Ref::new(self.database, self.index)),
+            Element::Concrete(_) => ElementRef::Concrete(Ref::new(self.database, self.index)),
+            Element::Relation(_) => ElementRef::Relation(Ref::new(self.database, self.index)),
+        }
+    }
+}
+impl<'a> Ref<'a, Atom> {
+    pub fn value(&self) -> &Atom {
+        match self.data().value {
+            Element::Concrete(ref atom) => atom,
+            _ => panic!("Ref<Atom> must be an atom"),
+        }
+    }
+}
+impl<'a> Ref<'a, Relation> {
+    pub fn value(&self) -> &Relation {
+        match self.data().value {
+            Element::Relation(ref rel) => rel,
+            _ => panic!("Ref<Relation> must be a relation"),
+        }
+    }
+    pub fn subject(&self) -> Ref<'a, Element> {
+        Ref::new(self.database, self.value().subject)
+    }
+    pub fn descriptor(&self) -> Ref<'a, Element> {
+        Ref::new(self.database, self.value().descriptor)
+    }
+    pub fn complement(&self) -> Option<Ref<'a, Element>> {
+        self.value().complement.map(|i| Ref::new(self.database, i))
+    }
+}
+impl<'a> RelationRefSet<'a> {
+    fn new(db: &'a Database, set: &'a Set<Index>) -> Self {
+        Self {
+            database: db,
+            set: set,
+        }
+    }
+    // TODO size, op[i], contains, into_iter using Map ?
+}
 
 /******************************************************************************
  * Utils.
