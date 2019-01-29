@@ -20,16 +20,21 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// All database elements are referenced by an index, and share the same index space.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Index(pub usize);
+pub type Index = usize;
+
+// Internal typedefs for clarity, indicate that the element must be of a certain type.
+type AtomIndex = usize;
+type RelationIndex = usize;
 
 /// Abtract object, not self contained, described by its relations.
-pub struct Object;
+pub struct Abstract;
 
 /// Atom of data that is known, self contained, indexable.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Atom {
     Text(String),
+    // TODO integers ?
+    // TODO tuple of atoms ? (for dates, etc)
 }
 
 /// Binary relation between any two elements, tagged by a third one.
@@ -59,16 +64,15 @@ pub enum Element {
 }
 struct ElementData {
     value: Element,
-    // All indexes are from Relations
-    subject_of: Set<Index>,
-    descriptor_of: Set<Index>,
-    complement_of: Set<Index>,
+    subject_of: Set<RelationIndex>,
+    descriptor_of: Set<RelationIndex>,
+    complement_of: Set<RelationIndex>,
 }
 
 pub struct Database {
     elements: SlotVec<ElementData>,
-    index_of_atoms: HashMap<Atom, Index>,
-    index_of_relations: HashMap<Relation, Index>,
+    index_of_atoms: HashMap<Atom, AtomIndex>,
+    index_of_relations: HashMap<Relation, RelationIndex>,
 }
 
 impl Database {
@@ -82,10 +86,7 @@ impl Database {
 
     // Add new entities to the database.
     pub fn create_abstract_element(&mut self) -> Index {
-        Index(add_new_element_to_data_vec(
-            &mut self.elements,
-            Element::Abstract,
-        ))
+        add_new_element_to_data_vec(&mut self.elements, Element::Abstract)
     }
     pub fn insert_atom(&mut self, atom: Atom) -> Index {
         match self.index_of_atom(&atom) {
@@ -93,7 +94,6 @@ impl Database {
             None => {
                 let index =
                     add_new_element_to_data_vec(&mut self.elements, Element::Atom(atom.clone()));
-                let index = Index(index);
                 self.index_of_atoms.insert(atom, index);
                 index
             }
@@ -101,7 +101,7 @@ impl Database {
     }
     pub fn insert_relation(&mut self, relation: Relation) -> Result<Index, Error> {
         let all_indexes_valid = {
-            let is_valid = |i: Index| self.elements.get(i.0).is_ok();
+            let is_valid = |i: Index| self.elements.get(i).is_ok();
             is_valid(relation.subject)
                 && is_valid(relation.descriptor)
                 && relation.complement.map_or(true, is_valid)
@@ -116,15 +116,14 @@ impl Database {
                     &mut self.elements,
                     Element::Relation(relation.clone()),
                 );
-                let index = Index(index);
-                self.elements[relation.subject.0].subject_of.insert(index);
-                self.elements[relation.descriptor.0]
+                self.elements[relation.subject].subject_of.insert(index);
+                self.elements[relation.descriptor]
                     .descriptor_of
                     .insert(index);
                 if let Some(i) = relation.complement {
-                    self.elements[i.0].complement_of.insert(index)
+                    self.elements[i].complement_of.insert(index)
                 }
-                self.elements[relation.subject.0].subject_of.insert(index);
+                self.elements[relation.subject].subject_of.insert(index);
                 self.index_of_relations.insert(relation, index);
                 index
             }
@@ -132,7 +131,7 @@ impl Database {
     }
 
     pub fn element(&self, i: Index) -> Result<Ref<Element>, Error> {
-        self.elements.get(i.0).map(|_| Ref::new(self, i))
+        self.elements.get(i).map(|_| Ref::new(self, i))
     }
 
     // Retrieve index of indexable entities.
@@ -170,7 +169,7 @@ pub struct RelationRefSet<'a> {
 }
 /// Enum of ref structs, to perform exploration.
 pub enum ElementRef<'a> {
-    Abstract(Ref<'a, Object>),
+    Abstract(Ref<'a, Abstract>),
     Atom(Ref<'a, Atom>),
     Relation(Ref<'a, Relation>),
 }
@@ -199,7 +198,7 @@ impl<'a, E> Ref<'a, E> {
         RelationRefSet::new(self.database, &self.data().complement_of)
     }
     fn data(&self) -> &'a ElementData {
-        &self.database.elements[self.index.0]
+        &self.database.elements[self.index]
     }
 }
 impl<'a> Ref<'a, Element> {
@@ -342,6 +341,7 @@ impl<T: Ord> std::ops::Deref for Set<T> {
 pub mod prelude {
     pub use super::Database;
     pub use super::Index;
+    pub use super::{Abstract, Atom, Relation};
 }
 
 /******************************************************************************
@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(Some(relation_i), db.index_of_relation(&relation));
         assert_eq!(Ok(relation_i), db.insert_relation(relation));
         let relation2 = Relation {
-            subject: Index(42), // Bad index
+            subject: 42, // Bad index
             descriptor: is_named_i,
             complement: None,
         };
@@ -472,7 +472,7 @@ mod tests {
 
         // Test ref api
         assert!(db.element(name_i).is_ok());
-        assert!(db.element(Index(42)).is_err());
+        assert!(db.element(42).is_err());
         let r_name = db.element(name_i).unwrap();
         assert_eq!(name_i, r_name.index());
         assert!(match r_name.cases() {
