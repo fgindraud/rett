@@ -41,9 +41,20 @@ pub struct Relation {
     complement: Option<Index>,
 }
 
+impl From<String> for Atom {
+    fn from(s: String) -> Atom {
+        Atom::Text(s)
+    }
+}
+impl From<&str> for Atom {
+    fn from(s: &str) -> Atom {
+        Atom::Text(s.into())
+    }
+}
+
 pub enum Element {
     Abstract,
-    Concrete(Atom),
+    Atom(Atom),
     Relation(Relation),
 }
 struct ElementData {
@@ -80,10 +91,8 @@ impl Database {
         match self.index_of_atom(&atom) {
             Some(index) => index,
             None => {
-                let index = add_new_element_to_data_vec(
-                    &mut self.elements,
-                    Element::Concrete(atom.clone()),
-                );
+                let index =
+                    add_new_element_to_data_vec(&mut self.elements, Element::Atom(atom.clone()));
                 let index = Index(index);
                 self.index_of_atoms.insert(atom, index);
                 index
@@ -147,12 +156,14 @@ fn add_new_element_to_data_vec(v: &mut SlotVec<ElementData>, e: Element) -> usiz
 /// A Ref<'a, E> is a valid index into the database to an "element of type E".
 /// If E is Atom/Object/Relation, this is a ref to the specific variant.
 /// If E is Element, this is a ref to any type (but still valid index).
+#[derive(Clone, Copy)]
 pub struct Ref<'a, ElementType> {
     database: &'a Database,
     index: Index,
     marker: PhantomData<&'a ElementType>,
 }
 /// Wrap a Set<Index> so that it returns Ref<Relation> instead.
+#[derive(Clone, Copy)]
 pub struct RelationRefSet<'a> {
     database: &'a Database,
     set: &'a Set<Index>,
@@ -160,7 +171,7 @@ pub struct RelationRefSet<'a> {
 /// Enum of ref structs, to perform exploration.
 pub enum ElementRef<'a> {
     Abstract(Ref<'a, Object>),
-    Concrete(Ref<'a, Atom>),
+    Atom(Ref<'a, Atom>),
     Relation(Ref<'a, Relation>),
 }
 
@@ -195,7 +206,7 @@ impl<'a> Ref<'a, Element> {
     pub fn cases(&self) -> ElementRef<'a> {
         match self.data().value {
             Element::Abstract => ElementRef::Abstract(Ref::new(self.database, self.index)),
-            Element::Concrete(_) => ElementRef::Concrete(Ref::new(self.database, self.index)),
+            Element::Atom(_) => ElementRef::Atom(Ref::new(self.database, self.index)),
             Element::Relation(_) => ElementRef::Relation(Ref::new(self.database, self.index)),
         }
     }
@@ -203,7 +214,7 @@ impl<'a> Ref<'a, Element> {
 impl<'a> Ref<'a, Atom> {
     pub fn value(&self) -> &Atom {
         match self.data().value {
-            Element::Concrete(ref atom) => atom,
+            Element::Atom(ref atom) => atom,
             _ => panic!("Ref<Atom> must be an atom"),
         }
     }
@@ -232,7 +243,16 @@ impl<'a> RelationRefSet<'a> {
             set: set,
         }
     }
-    // TODO size, op[i], contains, into_iter using Map ?
+    pub fn len(&self) -> usize {
+        self.set.len()
+    }
+    pub fn get(&self, i: usize) -> Ref<'a, Relation> {
+        Ref::new(self.database, self.set[i])
+    }
+    pub fn iter(&self) -> impl Iterator<Item = Ref<'a, Relation>> {
+        let database = self.database; // Explicitely clone ref
+        self.set.into_iter().map(move |i| Ref::new(database, *i))
+    }
 }
 
 /******************************************************************************
@@ -408,115 +428,132 @@ impl<'d> Deserialize<'d> for Corpus {
         Ok(corpus)
     }
 }
-
+*/
 
 /******************************************************************************
  * Tests.
  */
 #[cfg(test)]
 mod tests {
-use super::super::serde_json;
-use super::*;
+    use super::*;
 
-#[test]
-fn basic() {
-let mut corpus = Corpus::new();
-let name = Noun("Name".to_string());
-let ni = corpus.insert_noun(name.clone());
-let oi = corpus.create_object();
-let vi = corpus.insert_verb(Verb::IsNamed);
-let sentence = Sentence {
-subject: Subject::Object(oi),
-verb: vi,
-complement: Complement::Noun(ni),
-};
-let si = corpus.insert_sentence(sentence.clone()).unwrap();
+    #[test]
+    fn basic() {
+        // Create a very small database
+        let mut db = Database::new();
+        let name = Atom::from("Name");
+        let name_i = db.insert_atom(name.clone());
+        let object_i = db.create_abstract_element();
+        let is_named = Atom::from("is named");
+        let is_named_i = db.insert_atom(is_named.clone());
+        let relation = Relation {
+            subject: object_i,
+            descriptor: is_named_i,
+            complement: Some(name_i),
+        };
+        let relation_i = db.insert_relation(relation.clone()).unwrap();
 
-assert_eq!(Some(ni), corpus.index_of(&name));
-assert_eq!(ni, corpus.insert_noun(name));
-let name2 = Noun("name".to_string());
-assert_eq!(None, corpus.index_of(&name2));
-assert_ne!(ni, corpus.insert_noun(name2));
+        // Test raw API.
+        assert_eq!(Some(name_i), db.index_of_atom(&name));
+        assert_eq!(name_i, db.insert_atom(name));
+        let name2 = Atom::from("name");
+        assert_eq!(None, db.index_of_atom(&name2));
+        assert_ne!(name_i, db.insert_atom(name2));
 
-assert_eq!(Some(vi), corpus.index_of(&Verb::IsNamed));
-assert_eq!(vi, corpus.insert_verb(Verb::IsNamed));
-let verb2 = Verb::Text("is named".to_string());
-assert_eq!(None, corpus.index_of(&verb2));
-assert_ne!(vi, corpus.insert_verb(verb2));
+        assert_eq!(Some(relation_i), db.index_of_relation(&relation));
+        assert_eq!(Ok(relation_i), db.insert_relation(relation));
+        let relation2 = Relation {
+            subject: Index(42), // Bad index
+            descriptor: is_named_i,
+            complement: None,
+        };
+        assert_eq!(None, db.index_of_relation(&relation2));
+        assert_eq!(Err(Error::InvalidIndex), db.insert_relation(relation2));
 
-assert_eq!(Some(si), corpus.index_of(&sentence));
-assert_eq!(Ok(si), corpus.insert_sentence(sentence));
-let sentence2 = Sentence {
-subject: Subject::Object(ObjectIndex(42)), // Bad index
-verb: vi,
-complement: Complement::Noun(ni),
-};
-assert_eq!(None, corpus.index_of(&sentence2));
-assert_eq!(Err(Error::InvalidIndex), corpus.insert_sentence(sentence2));
-}
+        // Test ref api
+        assert!(db.element(name_i).is_ok());
+        assert!(db.element(Index(42)).is_err());
+        let r_name = db.element(name_i).unwrap();
+        assert_eq!(name_i, r_name.index());
+        assert!(match r_name.cases() {
+            ElementRef::Atom(_) => true,
+            _ => false,
+        });
+        assert_eq!(r_name.subject_of().len(), 0);
+        assert_eq!(r_name.descriptor_of().len(), 0);
+        assert_eq!(r_name.complement_of().len(), 1);
+        let r_name = match r_name.cases() {
+            ElementRef::Atom(a) => a,
+            _ => panic!("not atom"),
+        };
+        assert_eq!(r_name.value(), &Atom::from("Name"));
 
-#[test]
-fn io() {
-let mut corpus = Corpus::new();
-let name = Noun("Name".to_string());
-let ni = corpus.insert_noun(name.clone());
-let oi = corpus.create_object();
-let vi = corpus.insert_verb(Verb::IsNamed);
-let sentence = Sentence {
-subject: Subject::Object(oi),
-verb: vi,
-complement: Complement::Noun(ni),
-};
-let _si = corpus.insert_sentence(sentence.clone()).unwrap();
+        let complement = r_name.complement_of().get(0);
+        assert_eq!(complement.index(), relation_i);
+    }
 
-let serialized = serde_json::to_string(&corpus).expect("Serialization failure");
-let deserialized: Corpus =
-serde_json::from_str(&serialized).expect("Deserialization failure");
-
-for i in 0..corpus.objects.inner.len() {
-assert_eq!(
-corpus.objects.get(i).map(|o| &o.description),
-deserialized.objects.get(i).map(|o| &o.description)
-);
-assert_eq!(
-corpus.objects.get(i).map(|o| &o.subject_of),
-deserialized.objects.get(i).map(|o| &o.subject_of)
-);
-assert_eq!(
-corpus.objects.get(i).map(|o| &o.complement_of),
-deserialized.objects.get(i).map(|o| &o.complement_of)
-);
+    /*
+    #[test]
+    fn io() {
+        let mut corpus = Corpus::new();
+        let name = Noun("Name".to_string());
+        let ni = corpus.insert_noun(name.clone());
+        let oi = corpus.create_object();
+        let vi = corpus.insert_verb(Verb::IsNamed);
+        let sentence = Sentence {
+            subject: Subject::Object(oi),
+            verb: vi,
+            complement: Complement::Noun(ni),
+        };
+        let _si = corpus.insert_sentence(sentence.clone()).unwrap();
+    
+        let serialized = serde_json::to_string(&corpus).expect("Serialization failure");
+        let deserialized: Corpus =
+            serde_json::from_str(&serialized).expect("Deserialization failure");
+    
+        for i in 0..corpus.objects.inner.len() {
+            assert_eq!(
+                corpus.objects.get(i).map(|o| &o.description),
+                deserialized.objects.get(i).map(|o| &o.description)
+            );
+            assert_eq!(
+                corpus.objects.get(i).map(|o| &o.subject_of),
+                deserialized.objects.get(i).map(|o| &o.subject_of)
+            );
+            assert_eq!(
+                corpus.objects.get(i).map(|o| &o.complement_of),
+                deserialized.objects.get(i).map(|o| &o.complement_of)
+            );
+        }
+        for i in 0..corpus.nouns.inner.len() {
+            assert_eq!(
+                corpus.nouns.get(i).map(|n| &n.noun),
+                deserialized.nouns.get(i).map(|n| &n.noun)
+            );
+            assert_eq!(
+                corpus.nouns.get(i).map(|n| &n.complement_of),
+                deserialized.nouns.get(i).map(|n| &n.complement_of)
+            );
+        }
+        for i in 0..corpus.verbs.inner.len() {
+            assert_eq!(
+                corpus.verbs.get(i).map(|v| &v.verb),
+                deserialized.verbs.get(i).map(|v| &v.verb)
+            );
+            assert_eq!(
+                corpus.verbs.get(i).map(|v| &v.verb_of),
+                deserialized.verbs.get(i).map(|v| &v.verb_of)
+            );
+        }
+        for i in 0..corpus.sentences.inner.len() {
+            assert_eq!(
+                corpus.sentences.get(i).map(|s| &s.sentence),
+                deserialized.sentences.get(i).map(|s| &s.sentence)
+            );
+            assert_eq!(
+                corpus.sentences.get(i).map(|s| &s.subject_of),
+                deserialized.sentences.get(i).map(|s| &s.subject_of)
+            );
+        }
+    }*/
 }
-for i in 0..corpus.nouns.inner.len() {
-assert_eq!(
-corpus.nouns.get(i).map(|n| &n.noun),
-deserialized.nouns.get(i).map(|n| &n.noun)
-);
-assert_eq!(
-corpus.nouns.get(i).map(|n| &n.complement_of),
-deserialized.nouns.get(i).map(|n| &n.complement_of)
-);
-}
-for i in 0..corpus.verbs.inner.len() {
-assert_eq!(
-corpus.verbs.get(i).map(|v| &v.verb),
-deserialized.verbs.get(i).map(|v| &v.verb)
-);
-assert_eq!(
-corpus.verbs.get(i).map(|v| &v.verb_of),
-deserialized.verbs.get(i).map(|v| &v.verb_of)
-);
-}
-for i in 0..corpus.sentences.inner.len() {
-assert_eq!(
-corpus.sentences.get(i).map(|s| &s.sentence),
-deserialized.sentences.get(i).map(|s| &s.sentence)
-);
-assert_eq!(
-corpus.sentences.get(i).map(|s| &s.subject_of),
-deserialized.sentences.get(i).map(|s| &s.subject_of)
-);
-}
-}
-}
-*/
