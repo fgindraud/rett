@@ -345,17 +345,50 @@ pub mod prelude {
 }
 
 /******************************************************************************
- * IO using serde. FIXME use simple text format.
+ * IO using a simple text format.
  *
- * Serialized as multiple Vec<Opt<DataStruct>>.
- * Foreach DataStruct, only serialize the inner object (not the backlinks).
- * After a row of serialize + deserialize, indexes are conserved.
+ * The slot-vector of elements is printed with one line per slot, in order.
+ * The first char of the line indicates which type of element the line represents.
+ * Empty lines are empty slots.
  */
 pub fn from_reader<R: io::Read>(reader: R) -> io::Result<Database> {
     unimplemented!()
 }
-pub fn to_writer<W: io::Write>(writer: W, database: &Database) -> io::Result<()> {
-    unimplemented!()
+pub fn to_writer<W: io::Write>(mut writer: W, database: &Database) -> io::Result<()> {
+    for element_slot in database.elements.inner.iter() {
+        if let Some(element) = element_slot {
+            match element.value {
+                Element::Abstract => write!(writer, "A\n"),
+                Element::Atom(ref atom) => match atom {
+                    Atom::Text(ref s) => write!(writer, "T {}\n", EscapedAtomText(s)),
+                },
+                Element::Relation(ref rel) => {
+                    if let Some(complement) = rel.complement {
+                        write!(
+                            writer,
+                            "R {} {} {}\n",
+                            rel.subject, rel.descriptor, complement
+                        )
+                    } else {
+                        write!(writer, "R {} {}\n", rel.subject, rel.descriptor)
+                    }
+                }
+            }
+        } else {
+            write!(writer, "\n")
+        }?
+    }
+    Ok(())
+}
+struct EscapedAtomText<'a>(&'a str);
+impl<'a> fmt::Display for EscapedAtomText<'a> {
+    // Remove all \n. TODO replace with ' ' or something else ?
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for s in self.0.split('\n') {
+            s.fmt(f)?
+        }
+        Ok(())
+    }
 }
 
 /*
