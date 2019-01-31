@@ -355,41 +355,145 @@ pub mod prelude {
 impl Database {
     pub fn write_to<W: io::Write>(&self, mut w: W) -> io::Result<()> {
         for element_slot in self.elements.inner.iter() {
-            if let Some(element) = element_slot {
-                match element.value {
+            match element_slot {
+                Some(element) => match element.value {
                     Element::Abstract => write!(w, "A\n"),
                     Element::Atom(ref atom) => match atom {
                         Atom::Text(ref s) => write!(w, "T {}\n", EscapedAtomText(s)),
                     },
-                    Element::Relation(ref rel) => {
-                        if let Some(complement) = rel.complement {
-                            write!(w, "R {} {} {}\n", rel.subject, rel.descriptor, complement)
-                        } else {
-                            write!(w, "R {} {}\n", rel.subject, rel.descriptor)
-                        }
-                    }
-                }
-            } else {
-                write!(w, "\n")
+                    Element::Relation(ref rel) => match rel.complement {
+                        Some(c) => write!(w, "R {} {} {}\n", rel.subject, rel.descriptor, c),
+                        None => write!(w, "R {} {}\n", rel.subject, rel.descriptor),
+                    },
+                },
+                None => write!(w, "\n"),
             }?
         }
         Ok(())
     }
     pub fn read_from<R: io::BufRead>(reader: R) -> io::Result<Database> {
-        let mut database = Database::new();
-        // Fill empty database with raw elements
+        let mut db = Database::new();
+        // Fill empty db with raw elements
+        let element_for = |line: &str| -> Result<Element, &str> {
+            let (type_char, tail) = split_first(line).unwrap();
+            match type_char {
+                'A' => match tail {
+                    "" => Ok(Element::Abstract),
+                    _ => Err("Abstract: trailing text"),
+                },
+                'T' => match split_first(tail) {
+                    Some((' ', text)) => Ok(Element::Atom(Atom::from(text))),
+                    _ => Err("Text: missing space"),
+                },
+                'R' => match split_first(tail) {
+                    Some((' ', text)) => {
+                        let mut it = text.split(' ').map(|s| s.parse::<usize>());
+                        let fields = [it.next(), it.next(), it.next(), it.next()];
+                        match fields {
+                            [Some(Ok(s)), Some(Ok(d)), Some(Ok(c)), None] => {
+                                Ok(Element::Relation(Relation {
+                                    subject: s,
+                                    descriptor: d,
+                                    complement: Some(c),
+                                }))
+                            }
+                            [Some(Ok(s)), Some(Ok(d)), None, None] => {
+                                Ok(Element::Relation(Relation {
+                                    subject: s,
+                                    descriptor: d,
+                                    complement: None,
+                                }))
+                            }
+                            _ => Err("Relation: bad field format or count"),
+                        }
+                    }
+                    _ => Err("Relation: missing space"),
+                },
+                _ => Err("Unrecognized type char"),
+            }
+        };
         for maybe_line in reader.lines() {
             let line = maybe_line?;
-            let element = if line.is_empty() {
-                None
+            let slot = if !line.is_empty() {
+                match element_for(&line) {
+                    Ok(e) => Some(ElementData::new(e)),
+                    Err(reason) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("Cannot parse line '{}': {}", line, reason),
+                        ));
+                    }
+                }
             } else {
-                // FIXME finish parsing
-                Some(ElementData::new(Element::Abstract))
+                None
             };
-            database.elements.inner.push(element)
+            db.elements.inner.push(slot)
         }
-        // Update all elements with cross links
-        Ok(database)
+        // Check referenced indexes, update index maps
+        let nb_slots = db.elements.inner.len();
+        for index in 0..nb_slots {
+            let elements = &db.elements;
+            let validate_index = |i: Index| match elements.get(i) {
+                Ok(_) => Ok(()),
+                Err(_) => Err("invalid index"),
+            };
+            if let Some(ref data) = elements.inner[index] {
+                let check_and_register = match data.value {
+                    Element::Atom(ref a) => match db.index_of_atoms.insert(a.clone(), index) {
+                        Some(_previous) => Err("atom duplicated"),
+                        None => Ok(()),
+                    },
+                    Element::Relation(ref r) => {
+                        match db.index_of_relations.insert(r.clone(), index) {
+                            Some(_previous) => Err("relation duplicated"),
+                            None => Ok(()),
+                        }
+                        .and_then(|()| validate_index(r.subject))
+                        .and_then(|()| validate_index(r.descriptor))
+                        .and_then(|()| r.complement.map_or(Ok(()), validate_index))
+                    }
+                    Element::Abstract => Ok(()),
+                };
+                check_and_register.map_err(|s| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Bad Element at index {}: {}", index, s),
+                    )
+                })?;
+            }
+        }
+        // Update *_of sets. Must be done carefully, as we scan and mutate db.elements.
+        for index in 0..nb_slots {
+            // Clone indexes if this is a relation, to avoid keeping a ref to db.elements.
+            let maybe_relation = match db.elements.inner[index] {
+                Some(ElementData {
+                    value: Element::Relation(ref r),
+                    ..
+                }) => Some(r.clone()),
+                _ => None,
+            };
+            // Add to sets, indexes are already validated at the previous steps.
+            if let Some(relation) = maybe_relation {
+                db.elements
+                    .get_mut(relation.subject)
+                    .unwrap()
+                    .subject_of
+                    .insert(index);
+                db.elements
+                    .get_mut(relation.descriptor)
+                    .unwrap()
+                    .descriptor_of
+                    .insert(index);
+                if let Some(complement) = relation.complement {
+                    db.elements
+                        .get_mut(complement)
+                        .unwrap()
+                        .complement_of
+                        .insert(index);
+                }
+            }
+        }
+        Ok(db)
     }
 }
 struct EscapedAtomText<'a>(&'a str);
@@ -402,78 +506,12 @@ impl<'a> fmt::Display for EscapedAtomText<'a> {
         Ok(())
     }
 }
-
-/*
-#[derive(Deserialize)]
-struct NotValidatedCorpus {
-    objects: SlotVec<ObjectData>,
-    nouns: SlotVec<NounData>,
-    verbs: SlotVec<VerbData>,
-    sentences: SlotVec<SentenceData>,
+fn split_first(s: &str) -> Option<(char, &str)> {
+    s.chars().next().map(|first: char| {
+        let (_, tail) = s.split_at(first.len_utf8());
+        (first, tail)
+    })
 }
-
-/// Deserialize : backlinks must be restored and indexes validated.
-impl<'d> Deserialize<'d> for Corpus {
-    fn deserialize<D: Deserializer<'d>>(deserializer: D) -> Result<Self, D::Error> {
-        let deserialized = NotValidatedCorpus::deserialize(deserializer)?;
-
-        // Extract data in a new corpus
-        let mut corpus = Corpus::new();
-        corpus.objects = deserialized.objects;
-        corpus.nouns = deserialized.nouns;
-        corpus.verbs = deserialized.verbs;
-        corpus.sentences = deserialized.sentences;
-
-        // Restore back links and validate
-        use serde::de::Error as DE;
-        for index in 0..corpus.sentences.inner.len() {
-            if corpus.sentences.get(index).is_ok() {
-                // Clone Sentence struct to avoid clash with mutable refs for Corpus changes.
-                let sentence = corpus.sentences[index].sentence.clone();
-                let s_index = SentenceIndex(index);
-                // Restore links, validate indexes at the same time.
-                match sentence.subject {
-                    Subject::Object(o) => corpus
-                        .objects
-                        .get_mut(o.0)
-                        .map_err(DE::custom)?
-                        .subject_of
-                        .insert(s_index),
-                    Subject::Sentence(s) => corpus
-                        .sentences
-                        .get_mut(s.0)
-                        .map_err(DE::custom)?
-                        .subject_of
-                        .insert(s_index),
-                }
-                corpus
-                    .verbs
-                    .get_mut(sentence.verb.0)
-                    .map_err(DE::custom)?
-                    .verb_of
-                    .insert(s_index);
-                match sentence.complement {
-                    Complement::None => (),
-                    Complement::Noun(n) => corpus
-                        .nouns
-                        .get_mut(n.0)
-                        .map_err(DE::custom)?
-                        .complement_of
-                        .insert(s_index),
-                    Complement::Object(o) => corpus
-                        .objects
-                        .get_mut(o.0)
-                        .map_err(DE::custom)?
-                        .complement_of
-                        .insert(s_index),
-                }
-            }
-        }
-
-        Ok(corpus)
-    }
-}
-*/
 
 /******************************************************************************
  * Tests.
@@ -537,7 +575,7 @@ mod tests {
         assert_eq!(complement.index(), relation_i);
     }
 
-    /*
+    /* TODO restore!
     #[test]
     fn io() {
         let mut corpus = Corpus::new();
