@@ -16,11 +16,12 @@ use relations::Database;
 /// Wiki interface
 //mod wiki;
 use std::fs::File;
+use std::io;
 use std::path::Path;
 
 fn read_database_from_file(filename: &Path) -> Database {
     match File::open(filename) {
-        Ok(file) => match relations::from_reader(file) {
+        Ok(file) => match Database::read_from(io::BufReader::new(file)) {
             Ok(database) => return database,
             Err(e) => eprintln!(
                 "Warning: invalid database format in file {}: {}",
@@ -40,7 +41,7 @@ fn read_database_from_file(filename: &Path) -> Database {
 fn write_database_to_file(filename: &Path, database: &Database) {
     match File::create(filename) {
         Ok(file) => {
-            if let Err(e) = relations::to_writer(file, database) {
+            if let Err(e) = database.write_to(io::BufWriter::new(file)) {
                 eprintln!(
                     "Warning: cannot write database to {}: {}",
                     filename.display(),

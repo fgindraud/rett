@@ -68,6 +68,16 @@ struct ElementData {
     descriptor_of: Set<RelationIndex>,
     complement_of: Set<RelationIndex>,
 }
+impl ElementData {
+    fn new(e: Element) -> Self {
+        Self {
+            value: e,
+            subject_of: Set::new(),
+            descriptor_of: Set::new(),
+            complement_of: Set::new(),
+        }
+    }
+}
 
 pub struct Database {
     elements: SlotVec<ElementData>,
@@ -86,14 +96,15 @@ impl Database {
 
     // Add new entities to the database.
     pub fn create_abstract_element(&mut self) -> Index {
-        add_new_element_to_data_vec(&mut self.elements, Element::Abstract)
+        self.elements.insert(ElementData::new(Element::Abstract))
     }
     pub fn insert_atom(&mut self, atom: Atom) -> Index {
         match self.index_of_atom(&atom) {
             Some(index) => index,
             None => {
-                let index =
-                    add_new_element_to_data_vec(&mut self.elements, Element::Atom(atom.clone()));
+                let index = self
+                    .elements
+                    .insert(ElementData::new(Element::Atom(atom.clone())));
                 self.index_of_atoms.insert(atom, index);
                 index
             }
@@ -112,10 +123,9 @@ impl Database {
         Ok(match self.index_of_relation(&relation) {
             Some(index) => index,
             None => {
-                let index = add_new_element_to_data_vec(
-                    &mut self.elements,
-                    Element::Relation(relation.clone()),
-                );
+                let index = self
+                    .elements
+                    .insert(ElementData::new(Element::Relation(relation.clone())));
                 self.elements[relation.subject].subject_of.insert(index);
                 self.elements[relation.descriptor]
                     .descriptor_of
@@ -141,15 +151,6 @@ impl Database {
     pub fn index_of_relation(&self, relation: &Relation) -> Option<Index> {
         self.index_of_relations.get(relation).cloned()
     }
-}
-
-fn add_new_element_to_data_vec(v: &mut SlotVec<ElementData>, e: Element) -> usize {
-    v.insert(ElementData {
-        value: e,
-        subject_of: Set::new(),
-        descriptor_of: Set::new(),
-        complement_of: Set::new(),
-    })
 }
 
 /// A Ref<'a, E> is a valid index into the database to an "element of type E".
@@ -351,34 +352,45 @@ pub mod prelude {
  * The first char of the line indicates which type of element the line represents.
  * Empty lines are empty slots.
  */
-pub fn from_reader<R: io::Read>(reader: R) -> io::Result<Database> {
-    unimplemented!()
-}
-pub fn to_writer<W: io::Write>(mut writer: W, database: &Database) -> io::Result<()> {
-    for element_slot in database.elements.inner.iter() {
-        if let Some(element) = element_slot {
-            match element.value {
-                Element::Abstract => write!(writer, "A\n"),
-                Element::Atom(ref atom) => match atom {
-                    Atom::Text(ref s) => write!(writer, "T {}\n", EscapedAtomText(s)),
-                },
-                Element::Relation(ref rel) => {
-                    if let Some(complement) = rel.complement {
-                        write!(
-                            writer,
-                            "R {} {} {}\n",
-                            rel.subject, rel.descriptor, complement
-                        )
-                    } else {
-                        write!(writer, "R {} {}\n", rel.subject, rel.descriptor)
+impl Database {
+    pub fn write_to<W: io::Write>(&self, mut w: W) -> io::Result<()> {
+        for element_slot in self.elements.inner.iter() {
+            if let Some(element) = element_slot {
+                match element.value {
+                    Element::Abstract => write!(w, "A\n"),
+                    Element::Atom(ref atom) => match atom {
+                        Atom::Text(ref s) => write!(w, "T {}\n", EscapedAtomText(s)),
+                    },
+                    Element::Relation(ref rel) => {
+                        if let Some(complement) = rel.complement {
+                            write!(w, "R {} {} {}\n", rel.subject, rel.descriptor, complement)
+                        } else {
+                            write!(w, "R {} {}\n", rel.subject, rel.descriptor)
+                        }
                     }
                 }
-            }
-        } else {
-            write!(writer, "\n")
-        }?
+            } else {
+                write!(w, "\n")
+            }?
+        }
+        Ok(())
     }
-    Ok(())
+    pub fn read_from<R: io::BufRead>(reader: R) -> io::Result<Database> {
+        let mut database = Database::new();
+        // Fill empty database with raw elements
+        for maybe_line in reader.lines() {
+            let line = maybe_line?;
+            let element = if line.is_empty() {
+                None
+            } else {
+                // FIXME finish parsing
+                Some(ElementData::new(Element::Abstract))
+            };
+            database.elements.inner.push(element)
+        }
+        // Update all elements with cross links
+        Ok(database)
+    }
 }
 struct EscapedAtomText<'a>(&'a str);
 impl<'a> fmt::Display for EscapedAtomText<'a> {
