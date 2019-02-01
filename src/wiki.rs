@@ -405,24 +405,35 @@ where
 
 /* Wiki external files.
  * Static files are much easier to edit as standalone.
- * Use rust_embed to embed them in the binary (on release mode only).
+ * TODO review use of jquery !
+ * TODO use of doc.html ?
  */
-#[derive(RustEmbed)]
-#[folder = "wiki/"]
-struct Asset;
-
 fn send_asset(path: &str) -> Response {
-    if let Some(asset) = Asset::get(path) {
-        let content_type = match path {
-            path if path.ends_with(".css") => "text/css",
-            path if path.ends_with(".html") => "text/html",
-            path if path.ends_with(".js") => "application/javascript",
-            path if path.ends_with(".pdf") => "application/pdf",
-            path if path.ends_with(".ico") => "image/vnd.microsoft.icon",
-            _ => "application/octet-stream",
-        };
-        Response::from_data(content_type, asset) //FIXME.with_public_cache(3600)
-    } else {
-        Response::empty_404()
+    // FIXME in non debug use: .with_public_cache(3600)
+    match ASSETS.iter().filter(|asset| asset.path == path).next() {
+        Some(asset) => Response::from_data(asset.mime, asset.content),
+        None => Response::empty_404(),
     }
 }
+struct Asset {
+    path: &'static str,
+    mime: &'static str,
+    content: &'static str,
+}
+const ASSETS: [Asset; 3] = [
+    Asset {
+        path: "style.css",
+        mime: "text/css",
+        content: include_str!("wiki_assets/style.css"),
+    },
+    Asset {
+        path: "client.js",
+        mime: "application/javascript",
+        content: include_str!("wiki_assets/client.js"),
+    },
+    Asset {
+        path: "jquery.js",
+        mime: "application/javascript",
+        content: include_str!("wiki_assets/jquery.js"),
+    },
+];
