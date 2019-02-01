@@ -14,7 +14,7 @@ mod relations;
 use relations::Database;
 
 /// Wiki interface
-//mod wiki;
+mod wiki;
 use std::fs::File;
 use std::io;
 use std::path::Path;
@@ -74,14 +74,6 @@ fn main() {
                     Arg::with_name("addr")
                         .help("Address on which the server will bind")
                         .default_value("localhost:8000"),
-                )
-                .arg(
-                    clap::Arg::with_name("nb_threads")
-                        .short("n")
-                        .long("nb-threads")
-                        .takes_value(true)
-                        .default_value("2")
-                        .help("Size of the threadpool"),
                 ),
         )
         .get_matches();
@@ -93,13 +85,7 @@ fn main() {
     match matches.subcommand() {
         ("wiki", Some(args)) => {
             let addr = args.value_of("addr").unwrap();
-            let nb_threads: i32 = args
-                .value_of("nb_threads")
-                .unwrap()
-                .parse()
-                .expect("nb_threads: usize");
-            ()
-            //wiki::run(addr, database_filepath, nb_threads)
+            wiki::run(addr, database_filepath)
         }
         _ => panic!("Missing subcommand"),
     }

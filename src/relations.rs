@@ -1,7 +1,6 @@
 use std;
 use std::collections::HashMap;
 use std::fmt;
-use std::hash::Hash;
 use std::io;
 use std::marker::PhantomData;
 
@@ -334,15 +333,6 @@ impl<T: Ord> std::ops::Deref for Set<T> {
     fn deref(&self) -> &[T] {
         self.inner.deref()
     }
-}
-
-/******************************************************************************
- * Prelude for easy import.
- */
-pub mod prelude {
-    pub use super::Database;
-    pub use super::Index;
-    pub use super::{Abstract, Atom, Relation};
 }
 
 /******************************************************************************

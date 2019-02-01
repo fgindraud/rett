@@ -2,71 +2,72 @@
  * Database concurrent access and writing logic.
  * In its own module to scope the use;
  */
-mod database {
-    use corpus::Corpus;
-    use read_corpus_from_file;
+mod state {
+    use read_database_from_file;
+    use relations::Database;
     use std::ops::{Deref, DerefMut};
     use std::path::{Path, PathBuf};
     use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-    use write_corpus_to_file;
+    use write_database_to_file;
 
-    pub struct Database {
+    pub struct State {
         file: PathBuf,
-        corpus: RwLock<Corpus>,
+        database: RwLock<Database>,
     }
-    impl Database {
+    impl State {
         /// Initialize graph from file content.
         pub fn from_file(file: &Path) -> Self {
-            Database {
+            State {
                 file: file.to_owned(),
-                corpus: RwLock::new(read_corpus_from_file(file)),
+                database: RwLock::new(read_database_from_file(file)),
             }
         }
         /// Get read only access to the database.
-        pub fn access(&self) -> RwLockReadGuard<Corpus> {
-            self.corpus.read().unwrap()
+        pub fn access(&self) -> RwLockReadGuard<Database> {
+            self.database.read().unwrap()
         }
         /// Get write access to the database ; writes database to disk when lock is released.
         pub fn modify<'a>(&'a self) -> DatabaseWriteLock<'a> {
             DatabaseWriteLock {
                 file: &self.file,
-                lock: self.corpus.write().unwrap(),
+                lock: self.database.write().unwrap(),
             }
         }
     }
     pub struct DatabaseWriteLock<'a> {
         file: &'a Path,
-        lock: RwLockWriteGuard<'a, Corpus>,
+        lock: RwLockWriteGuard<'a, Database>,
     }
     impl<'a> Deref for DatabaseWriteLock<'a> {
-        type Target = Corpus;
-        fn deref(&self) -> &Corpus {
+        type Target = Database;
+        fn deref(&self) -> &Database {
             &self.lock
         }
     }
     impl<'a> DerefMut for DatabaseWriteLock<'a> {
-        fn deref_mut(&mut self) -> &mut Corpus {
+        fn deref_mut(&mut self) -> &mut Database {
             &mut self.lock
         }
     }
     impl<'a> Drop for DatabaseWriteLock<'a> {
         fn drop(&mut self) {
-            write_corpus_to_file(self.file, &self.lock)
+            write_database_to_file(self.file, &self.lock)
         }
     }
 }
 
-use corpus::prelude::*;
-use corpus::Ref;
 use horrorshow::{self, Render, RenderOnce, Template};
+use relations::{Abstract, Atom, Element, Index, Ref, Relation};
 use rouille::{self, Request, Response};
+use std::fmt;
 use std::path::Path;
 
 /******************************************************************************
  * HTTP server.
  */
-pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
-    let db = database::Database::from_file(file);
+pub fn run(addr: &str, file: &Path) -> ! {
+    let nb_threads = 2;
+    let db = state::State::from_file(file);
     eprintln!("Wiki starting on {}", addr);
     rouille::start_server_with_pool(addr, Some(nb_threads), move |request| {
         router!(request,
@@ -74,27 +75,9 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
         //            (GET) ["/"] => { main_page(&db.access()) },
         //            (GET) ["/all"] => { page_all_objects(&db.access()) },
                     // Elements by id
-                    (GET) ["/object/{id}", id: usize] => {
-                        match db.access().get_ref(ObjectIndex::new(id)) {
-                            Ok(r) => display_object_page(r),
-                            _ => Response::empty_404()
-                        }
-                    },
-                    (GET) ["/noun/{id}", id: usize] => {
-                        match db.access().get_ref(NounIndex::new(id)) {
-                            Ok(r) => display_noun_page(r),
-                            _ => Response::empty_404()
-                        }
-                    },
-                    (GET) ["/verb/{id}", id: usize] => {
-                        match db.access().get_ref(VerbIndex::new(id)) {
-                            Ok(r) => display_verb_page(r),
-                            _ => Response::empty_404()
-                        }
-                    },
-                    (GET) ["/sentence/{id}", id: usize] => {
-                        match db.access().get_ref(SentenceIndex::new(id)) {
-                            Ok(r) => display_sentence_page(r),
+                    (GET) ["/element/{id}", id: usize] => {
+                        match db.access().element(id as Index) {
+                            Ok(r) => display_page(r),
                             _ => Response::empty_404()
                         }
                     },
@@ -134,47 +117,16 @@ pub fn run(addr: &str, file: &Path, nb_threads: usize) -> ! {
  * TODO improve node selection system
  */
 
-fn object_url(id: ObjectIndex) -> String {
-    format!("/object/{}", id.to_raw_index())
-}
-fn noun_url(id: NounIndex) -> String {
-    format!("/noun/{}", id.to_raw_index())
-}
-fn verb_url(id: VerbIndex) -> String {
-    format!("/verb/{}", id.to_raw_index())
-}
-fn sentence_url(id: SentenceIndex) -> String {
-    format!("/sentence/{}", id.to_raw_index())
+// Display page is the page showing information, read only.
+struct DisplayPageUrl(Index);
+impl fmt::Display for DisplayPageUrl {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "/element/{}", self.0)
+    }
 }
 
-fn object_name(id: ObjectIndex) -> String {
-    format!("object {}", id.to_raw_index())
-}
-fn noun_name(id: NounIndex) -> String {
-    format!("noun {}", id.to_raw_index())
-}
-fn verb_name(id: VerbIndex) -> String {
-    format!("verb {}", id.to_raw_index())
-}
-fn sentence_name(id: SentenceIndex) -> String {
-    format!("sentence {}", id.to_raw_index())
-}
-
-fn display_object_page<'a>(r: Ref<'a, ObjectIndex>) -> Response {
-    let title = object_name(r.index);
-    wiki_page(title, html! {}, html! {})
-}
-fn display_noun_page<'a>(r: Ref<'a, NounIndex>) -> Response {
-    let title = noun_name(r.index);
-    wiki_page(title, html! {}, html! {})
-}
-fn display_verb_page<'a>(r: Ref<'a, VerbIndex>) -> Response {
-    let title = verb_name(r.index);
-    wiki_page(title, html! {}, html! {})
-}
-fn display_sentence_page<'a>(r: Ref<'a, SentenceIndex>) -> Response {
-    let title = sentence_name(r.index);
-    wiki_page(title, html! {}, html! {})
+fn display_page<'a>(r: Ref<'a, Element>) -> Response {
+    wiki_page("Title", html!{}, html!{})
 }
 
 //// Elements associated to a type of objects are tagged with HTML classes. Get class name.
