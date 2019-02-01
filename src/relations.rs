@@ -575,68 +575,51 @@ mod tests {
         assert_eq!(complement.index(), relation_i);
     }
 
-    /* TODO restore!
     #[test]
     fn io() {
-        let mut corpus = Corpus::new();
-        let name = Noun("Name".to_string());
-        let ni = corpus.insert_noun(name.clone());
-        let oi = corpus.create_object();
-        let vi = corpus.insert_verb(Verb::IsNamed);
-        let sentence = Sentence {
-            subject: Subject::Object(oi),
-            verb: vi,
-            complement: Complement::Noun(ni),
+        // Create a very small database
+        let mut db = Database::new();
+        let name = Atom::from("Name");
+        let name_i = db.insert_atom(name.clone());
+        let object_i = db.create_abstract_element();
+        let is_named = Atom::from("is named");
+        let is_named_i = db.insert_atom(is_named.clone());
+        let relation = Relation {
+            subject: object_i,
+            descriptor: is_named_i,
+            complement: Some(name_i),
         };
-        let _si = corpus.insert_sentence(sentence.clone()).unwrap();
-    
-        let serialized = serde_json::to_string(&corpus).expect("Serialization failure");
-        let deserialized: Corpus =
-            serde_json::from_str(&serialized).expect("Deserialization failure");
-    
-        for i in 0..corpus.objects.inner.len() {
-            assert_eq!(
-                corpus.objects.get(i).map(|o| &o.description),
-                deserialized.objects.get(i).map(|o| &o.description)
-            );
-            assert_eq!(
-                corpus.objects.get(i).map(|o| &o.subject_of),
-                deserialized.objects.get(i).map(|o| &o.subject_of)
-            );
-            assert_eq!(
-                corpus.objects.get(i).map(|o| &o.complement_of),
-                deserialized.objects.get(i).map(|o| &o.complement_of)
-            );
+        let relation_i = db.insert_relation(relation.clone()).unwrap();
+
+        // Serialization
+        let mut serialized: Vec<u8> = Vec::new();
+        db.write_to(&mut serialized).expect("serialization failure");
+        let expected_serialized = b"T Name\nA\nT is named\nR 1 2 0\n";
+        assert_eq!(serialized, expected_serialized);
+
+        // Deserialization
+        let db_clone = Database::read_from(serialized.as_slice()).expect("deserialization failure");
+        assert_eq!(db.elements.inner.len(), db_clone.elements.inner.len());
+        for i in 0..db.elements.inner.len() {
+            let both_slots_match = match (db.elements.get(i), db_clone.elements.get(i)) {
+                (Err(_), Err(_)) => true,
+                (Ok(dbo), Ok(dbc)) => {
+                    let element_match = match (&dbo.value, &dbc.value) {
+                        (Element::Abstract, Element::Abstract) => true,
+                        (Element::Atom(ref l), Element::Atom(ref r)) => l == r,
+                        (Element::Relation(ref l), Element::Relation(ref r)) => l == r,
+                        _ => false,
+                    };
+                    element_match
+                        && dbo.subject_of == dbc.subject_of
+                        && dbo.descriptor_of == dbc.descriptor_of
+                        && dbo.complement_of == dbc.complement_of
+                }
+                _ => false,
+            };
+            assert!(both_slots_match);
         }
-        for i in 0..corpus.nouns.inner.len() {
-            assert_eq!(
-                corpus.nouns.get(i).map(|n| &n.noun),
-                deserialized.nouns.get(i).map(|n| &n.noun)
-            );
-            assert_eq!(
-                corpus.nouns.get(i).map(|n| &n.complement_of),
-                deserialized.nouns.get(i).map(|n| &n.complement_of)
-            );
-        }
-        for i in 0..corpus.verbs.inner.len() {
-            assert_eq!(
-                corpus.verbs.get(i).map(|v| &v.verb),
-                deserialized.verbs.get(i).map(|v| &v.verb)
-            );
-            assert_eq!(
-                corpus.verbs.get(i).map(|v| &v.verb_of),
-                deserialized.verbs.get(i).map(|v| &v.verb_of)
-            );
-        }
-        for i in 0..corpus.sentences.inner.len() {
-            assert_eq!(
-                corpus.sentences.get(i).map(|s| &s.sentence),
-                deserialized.sentences.get(i).map(|s| &s.sentence)
-            );
-            assert_eq!(
-                corpus.sentences.get(i).map(|s| &s.subject_of),
-                deserialized.sentences.get(i).map(|s| &s.subject_of)
-            );
-        }
-    }*/
+        assert_eq!(db.index_of_atoms, db_clone.index_of_atoms);
+        assert_eq!(db.index_of_relations, db_clone.index_of_relations);
+    }
 }
