@@ -1,7 +1,5 @@
 // Wiki
 #[macro_use]
-extern crate rouille; // Simple http server
-#[macro_use]
 extern crate horrorshow; // HTML template engine
 
 #[macro_use]

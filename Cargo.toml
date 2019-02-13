@@ -5,6 +5,5 @@ authors = ["François Gindraud <francois.gindraud@gmail.com>"]
 description = "Tool to store, manipulate and display relational information"
 
 [dependencies]
-rouille = "2"
 clap = "2"
 horrorshow = "0.6"
