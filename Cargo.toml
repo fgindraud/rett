@@ -7,3 +7,5 @@ description = "Tool to store, manipulate and display relational information"
 [dependencies]
 clap = "2"
 horrorshow = "0.6"
+hyper = "0.12.24"
+tokio = { version = "^0.1.14", default-features = false, features = ["rt-full"] }

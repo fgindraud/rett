@@ -1,6 +1,8 @@
 // Wiki
 #[macro_use]
 extern crate horrorshow; // HTML template engine
+extern crate hyper;
+extern crate tokio;
 
 #[macro_use]
 extern crate clap; // Command line parser
@@ -69,7 +71,7 @@ fn main() {
                 .arg(
                     Arg::with_name("addr")
                         .help("Address on which the server will bind")
-                        .default_value("localhost:8000"),
+                        .default_value("127.0.0.1:8000"),
                 ),
         )
         .get_matches();
