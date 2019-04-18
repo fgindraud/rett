@@ -1,8 +1,13 @@
 use hyper::rt::Future;
 use hyper::service::service_fn_ok;
 use hyper::{Body, Request, Response, Server};
-use std::path::Path;
 use tokio::runtime::current_thread;
+
+use std::cell::RefCell;
+use std::path::Path;
+
+use horrorshow::{self, Render, RenderOnce, Template};
+use relations;
 
 pub fn run(addr: &str, database_file: &Path) {
     let addr = addr.parse().expect("Address::parse");
@@ -43,3 +48,53 @@ pub fn run(addr: &str, database_file: &Path) {
  *
  * Removal TODO
  */
+
+struct State {
+    database: RefCell<relations::Database>,
+}
+
+trait Page
+where
+    Self: Sized,
+{
+    fn to_url(&self) -> String;
+    fn from_request(request: &Request<()>) -> Option<Self>;
+    fn generate_page(&self, state: &State) -> Response<()>;
+}
+
+struct DisplayElement {
+    index: relations::Index,
+}
+impl Page for DisplayElement {
+    fn to_url(&self) -> String {
+        format!("/element/{}", self.index)
+    }
+}
+
+mod router {
+    /*
+    use hyper::Method;
+    use regex::Regex;
+
+    struct Route<T> {
+        method: Method,
+        path_pattern: Regex,
+        callback: Box<Fn(&[&str]) -> Option<T>>,
+    }
+
+    fn route0<T, F: Fn() -> T>(method: Method, path: &str, f: F) -> Route<T> {
+        Route {
+            method: method,
+            path_pattern: Regex::new(path).unwrap(),
+            callback: Box::new(|_: &[&str]| Some(f())),
+        }
+    }
+
+    struct RouteMap<T> {
+        routes: Vec<Route<T>>,
+    }
+    */
+
+    // URLs are percent_encoded.
+    // Use simple split on hyper::Uri::path, then use
+}
