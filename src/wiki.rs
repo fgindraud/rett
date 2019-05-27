@@ -58,42 +58,65 @@ where
     Self: Sized,
 {
     fn to_url(&self) -> String;
-    fn from_request(request: &Request<()>) -> Option<Self>;
-    fn generate_page(&self, state: &State) -> Response<()>;
+    //FIXME fn from_request(request: &Request<()>) -> Option<Self>;
+    //FIXME fn generate_page(&self, state: &State) -> Response<()>;
 }
 
 struct DisplayElement {
     index: relations::Index,
+    // Temporary selection for link creation
+    link_from: Option<relations::Index>,
+    link_to: Option<relations::Index>,
+    link_tag: Option<relations::Index>,
 }
 impl Page for DisplayElement {
     fn to_url(&self) -> String {
-        format!("/element/{}", self.index)
+        let query = [
+            ("link_from", self.link_from),
+            ("link_to", self.link_to),
+            ("link_tag", self.link_tag),
+        ];
+        let mut s = format!("/element/{}", self.index);
+
+        let mut first_query_entry = true;
+        for entry in query.into_iter() {
+            if let Some(index) = entry.1 {
+                let prefix_char = if first_query_entry {
+                    first_query_entry = false;
+                    '?'
+                } else {
+                    '&'
+                };
+                use std::fmt::Write;
+                write!(&mut s, "{}{}={}", prefix_char, entry.0, index).unwrap()
+            }
+        }
+        s
     }
 }
 
-mod router {
-    /*
-    use hyper::Method;
-    use regex::Regex;
+//TODO use percent-encoding crate for uri handling stuff
 
-    struct Route<T> {
-        method: Method,
-        path_pattern: Regex,
-        callback: Box<Fn(&[&str]) -> Option<T>>,
+mod router {
+    // TODO think more about design there
+    use hyper::Method;
+    use hyper::Uri;
+
+    pub trait FromUri<R> {
+        fn from_uri(uri: &Uri) -> Option<R>
+        where
+            Self: Sized;
     }
 
-    fn route0<T, F: Fn() -> T>(method: Method, path: &str, f: F) -> Route<T> {
-        Route {
-            method: method,
-            path_pattern: Regex::new(path).unwrap(),
-            callback: Box::new(|_: &[&str]| Some(f())),
+    pub struct Router<R> {
+        routes: Vec<Box<FromUri<R>>>,
+    }
+
+    impl<R> Router<R> {
+        pub fn new() -> Self {
+            Router { routes: Vec::new() }
         }
     }
-
-    struct RouteMap<T> {
-        routes: Vec<Route<T>>,
-    }
-    */
 
     // URLs are percent_encoded.
     // Use simple split on hyper::Uri::path, then use

@@ -2,6 +2,7 @@
 #[macro_use]
 extern crate horrorshow; // HTML template engine
 extern crate hyper;
+extern crate percent_encoding;
 extern crate tokio;
 
 #[macro_use]
