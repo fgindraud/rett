@@ -87,20 +87,25 @@ impl Page for DisplayElement {
 
 /// Uri related utilities
 mod uri {
-    use percent_encoding::{utf8_percent_encode, QUERY_ENCODE_SET};
+    use percent_encoding::{utf8_percent_encode, PercentEncode, QUERY_ENCODE_SET};
     use relations;
     use std::fmt::{self, Write};
 
-    /// T value in a Query Uri encoding. Has fmt::Display impls for supported types.
-    struct QueryFormat<T>(T);
-    impl fmt::Display for QueryFormat<relations::Index> {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            self.0.fmt(f) // Formatting an int does not require encoding
+    /// Convertible to something printable in a query string
+    trait ToQueryDisplayable {
+        type Output: fmt::Display;
+        fn to_query_displayable(&self) -> Self::Output;
+    }
+    impl ToQueryDisplayable for relations::Index {
+        type Output = relations::Index;
+        fn to_query_displayable(&self) -> Self::Output {
+            *self // Integers do not need URL-encoding
         }
     }
-    impl<'a> fmt::Display for QueryFormat<&'a str> {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            utf8_percent_encode(self.0, QUERY_ENCODE_SET).fmt(f)
+    impl<'a> ToQueryDisplayable for &'a str {
+        type Output = PercentEncode<'a, QUERY_ENCODE_SET>;
+        fn to_query_displayable(&self) -> Self::Output {
+            utf8_percent_encode(self, QUERY_ENCODE_SET) // Text needs URL-encoding
         }
     }
 
@@ -121,15 +126,15 @@ mod uri {
         }
         pub fn entry<K, V>(&mut self, key: K, value: V)
         where
-            QueryFormat<K>: fmt::Display,
-            QueryFormat<V>: fmt::Display,
+            K: ToQueryDisplayable,
+            V: ToQueryDisplayable,
         {
             write!(
                 &mut self.path_and_query,
                 "{}{}={}",
                 self.query_prefix_char,
-                QueryFormat(key),
-                QueryFormat(value)
+                key.to_query_displayable(),
+                value.to_query_displayable()
             )
             .unwrap();
             self.query_prefix_char = '&' // Entries are ?first=v&second=v&...
