@@ -71,31 +71,71 @@ struct DisplayElement {
 }
 impl Page for DisplayElement {
     fn to_url(&self) -> String {
-        let query = [
-            ("link_from", self.link_from),
-            ("link_to", self.link_to),
-            ("link_tag", self.link_tag),
-        ];
-        let mut s = format!("/element/{}", self.index);
-
-        let mut first_query_entry = true;
-        for entry in query.into_iter() {
-            if let Some(index) = entry.1 {
-                let prefix_char = if first_query_entry {
-                    first_query_entry = false;
-                    '?'
-                } else {
-                    '&'
-                };
-                use std::fmt::Write;
-                write!(&mut s, "{}{}={}", prefix_char, entry.0, index).unwrap()
-            }
+        let mut b = uri::PathQueryBuilder::new(format!("/element/{}", self.index));
+        if let Some(i) = self.link_from {
+            b.entry("link_from", i)
         }
-        s
+        if let Some(i) = self.link_to {
+            b.entry("link_to", i)
+        }
+        if let Some(i) = self.link_tag {
+            b.entry("link_tag", i)
+        }
+        b.build()
     }
 }
 
-//TODO use percent-encoding crate for uri handling stuff
+/// Uri related utilities
+mod uri {
+    use percent_encoding::{utf8_percent_encode, QUERY_ENCODE_SET};
+    use relations;
+    use std::fmt::{self, Write};
+
+    /// T value in a Query Uri encoding. Has fmt::Display impls for supported types.
+    struct QueryFormat<T>(T);
+    impl fmt::Display for QueryFormat<relations::Index> {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            self.0.fmt(f) // Formatting an int does not require encoding
+        }
+    }
+    impl<'a> fmt::Display for QueryFormat<&'a str> {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            utf8_percent_encode(self.0, QUERY_ENCODE_SET).fmt(f)
+        }
+    }
+
+    /// Build the Path and Query path of an Uri incrementally with a builder pattern.
+    pub struct PathQueryBuilder {
+        path_and_query: String,
+        query_prefix_char: char,
+    }
+    impl PathQueryBuilder {
+        pub fn new(path: String) -> Self {
+            PathQueryBuilder {
+                path_and_query: path,
+                query_prefix_char: '?',
+            }
+        }
+        pub fn build(self) -> String {
+            self.path_and_query
+        }
+        pub fn entry<K, V>(&mut self, key: K, value: V)
+        where
+            QueryFormat<K>: fmt::Display,
+            QueryFormat<V>: fmt::Display,
+        {
+            write!(
+                &mut self.path_and_query,
+                "{}{}={}",
+                self.query_prefix_char,
+                QueryFormat(key),
+                QueryFormat(value)
+            )
+            .unwrap();
+            self.query_prefix_char = '&' // Entries are ?first=v&second=v&...
+        }
+    }
+}
 
 mod router {
     // TODO think more about design there
