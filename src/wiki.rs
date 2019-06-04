@@ -87,12 +87,14 @@ impl Page for DisplayElement {
 
 /// Uri related utilities
 mod uri {
-    use percent_encoding::{utf8_percent_encode, PercentEncode, QUERY_ENCODE_SET};
+    use percent_encoding::{percent_decode, utf8_percent_encode, PercentEncode, QUERY_ENCODE_SET};
     use relations;
+    use std::borrow::Cow;
     use std::fmt::{self, Write};
 
     /// Convertible to something printable in a query string
     trait ToQueryDisplayable {
+        // This trait is an optimization over encode(to_string(T)) for some T.
         type Output: fmt::Display;
         fn to_query_displayable(&self) -> Self::Output;
     }
@@ -139,6 +141,74 @@ mod uri {
             .unwrap();
             self.query_prefix_char = '&' // Entries are ?first=v&second=v&...
         }
+    }
+
+    enum QueryDecodingErrors {
+        EqualDelimiter, // Delimiter is missing or more than one.
+        Utf8Error,      // Content is invalid Utf8 byte sequence after decoding.
+    }
+    pub fn decoded_query_entries<'a>(
+        query: &'a str,
+    ) -> impl Iterator<Item = Result<(Cow<'a, str>, Cow<'a, str>), QueryDecodingErrors>> {
+        query.split('&').map(|entry| {
+            let mut it = entry.split('=');
+            let fields = [it.next(), it.next(), it.next()];
+            match fields {
+                [Some(key), Some(value), None] => {
+                    let decode = |s| percent_decode(s).decode_utf8();
+                    match (decode(key.as_bytes()), decode(value.as_bytes())) {
+                        (Ok(key), Ok(value)) => Ok((key, value)),
+                        _ => Err(QueryDecodingErrors::Utf8Error),
+                    }
+                }
+                _ => Err(QueryDecodingErrors::EqualDelimiter),
+            }
+        })
+    }
+
+    struct ParserEnd;
+    struct ParserEntry<'a, T, Next: Parser> {
+        key: &'a str,
+        value: Option<T>,
+        next: Next,
+    }
+    trait Parser
+    where
+        Self: Sized,
+    {
+        fn entry<'a, T>(self, key: &'a str) -> ParserEntry<'a, T, Self> {
+            ParserEntry {
+                key: key,
+                value: None,
+                next: self,
+            }
+        }
+        fn parse(&mut self, key: &str, value: &str);
+    }
+    fn new_parser() -> ParserEnd {
+        ParserEnd
+    }
+    impl Parser for ParserEnd {
+        fn parse(&mut self, key: &str, _: &str) {
+            eprintln!("No such key found: {}", key)
+        }
+    }
+    impl<'a, T: std::str::FromStr, Next: Parser> Parser for ParserEntry<'a, T, Next> {
+        fn parse(&mut self, key: &str, value: &str) {
+            if key == self.key {
+                self.value = Some(value.parse().expect("Fail"))
+            } else {
+                self.next.parse(key, value)
+            }
+        }
+    }
+
+    #[test]
+    fn parser_test() {
+        let mut p = new_parser().entry::<i32>("blah").entry::<&str>("hello");
+        p.parse("blah", "100");
+        p.parse("hello", "23");
+        p.parse("zzz", "");
     }
 }
 
