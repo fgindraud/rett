@@ -53,13 +53,17 @@ struct State {
     database: RefCell<relations::Database>,
 }
 
+enum RequestParsingResult<T> {
+    Parsed(T),
+    NotParsed(Request<Body>),
+}
+
 trait Page
 where
     Self: Sized,
 {
     fn to_url(&self) -> String;
-    //FIXME fn from_request(request: &Request<()>) -> Option<Self>;
-    //FIXME fn generate_page(&self, state: &State) -> Response<()>;
+    fn from_request(request: Request<Body>) -> RequestParsingResult<Self>;
 }
 
 struct DisplayElement {
@@ -72,16 +76,13 @@ struct DisplayElement {
 impl Page for DisplayElement {
     fn to_url(&self) -> String {
         let mut b = uri::PathQueryBuilder::new(format!("/element/{}", self.index));
-        if let Some(i) = self.link_from {
-            b.entry("link_from", i)
-        }
-        if let Some(i) = self.link_to {
-            b.entry("link_to", i)
-        }
-        if let Some(i) = self.link_tag {
-            b.entry("link_tag", i)
-        }
+        b.optional_entry("link_from", self.link_from);
+        b.optional_entry("link_to", self.link_to);
+        b.optional_entry("link_tag", self.link_tag);
         b.build()
+    }
+    fn from_request(request: Request<Body>) -> RequestParsingResult<Self> {
+        RequestParsingResult::NotParsed(request)
     }
 }
 
@@ -141,6 +142,15 @@ mod uri {
             .unwrap();
             self.query_prefix_char = '&' // Entries are ?first=v&second=v&...
         }
+        pub fn optional_entry<K, V>(&mut self, key: K, value: Option<V>)
+        where
+            K: ToQueryDisplayable,
+            V: ToQueryDisplayable,
+        {
+            if let Some(v) = value {
+                self.entry(key, v)
+            }
+        }
     }
 
     enum QueryDecodingErrors {
@@ -166,50 +176,6 @@ mod uri {
         })
     }
 
-    struct ParserEnd;
-    struct ParserEntry<'a, T, Next: Parser> {
-        key: &'a str,
-        value: Option<T>,
-        next: Next,
-    }
-    trait Parser
-    where
-        Self: Sized,
-    {
-        fn entry<'a, T>(self, key: &'a str) -> ParserEntry<'a, T, Self> {
-            ParserEntry {
-                key: key,
-                value: None,
-                next: self,
-            }
-        }
-        fn parse(&mut self, key: &str, value: &str);
-    }
-    fn new_parser() -> ParserEnd {
-        ParserEnd
-    }
-    impl Parser for ParserEnd {
-        fn parse(&mut self, key: &str, _: &str) {
-            eprintln!("No such key found: {}", key)
-        }
-    }
-    impl<'a, T: std::str::FromStr, Next: Parser> Parser for ParserEntry<'a, T, Next> {
-        fn parse(&mut self, key: &str, value: &str) {
-            if key == self.key {
-                self.value = Some(value.parse().expect("Fail"))
-            } else {
-                self.next.parse(key, value)
-            }
-        }
-    }
-
-    #[test]
-    fn parser_test() {
-        let mut p = new_parser().entry::<i32>("blah").entry::<&str>("hello");
-        p.parse("blah", "100");
-        p.parse("hello", "23");
-        p.parse("zzz", "");
-    }
 }
 
 mod router {
