@@ -1,6 +1,6 @@
 use hyper::rt::Future;
 use hyper::service::service_fn_ok;
-use hyper::{Body, Request, Response, Server};
+use hyper::{Body, Method, Request, Response, Server};
 use tokio::runtime::current_thread;
 
 use std::cell::RefCell;
@@ -53,17 +53,12 @@ struct State {
     database: RefCell<relations::Database>,
 }
 
-enum RequestParsingResult<T> {
-    Parsed(T),
-    NotParsed(Request<Body>),
-}
-
 trait Page
 where
     Self: Sized,
 {
     fn to_url(&self) -> String;
-    fn from_request(request: Request<Body>) -> RequestParsingResult<Self>;
+    fn from_request(request: Request<Body>) -> Result<Self, Request<Body>>;
 }
 
 struct DisplayElement {
@@ -81,8 +76,22 @@ impl Page for DisplayElement {
         b.optional_entry("link_tag", self.link_tag);
         b.build()
     }
-    fn from_request(request: Request<Body>) -> RequestParsingResult<Self> {
-        RequestParsingResult::NotParsed(request)
+    fn from_request(request: Request<Body>) -> Result<Self, Request<Body>> {
+        if request.method() == &Method::GET {
+            if let Some(index) = uri::remove_prefix(request.uri().path(), "/element/")
+                .and_then(|s| s.parse::<relations::Index>().ok())
+            {
+                //FIXME return no-match | error | matched
+                return Ok(DisplayElement {
+                    index: index,
+                    //FIXME parse query.
+                    link_from: None,
+                    link_to: None,
+                    link_tag: None,
+                });
+            }
+        }
+        Err(request)
     }
 }
 
@@ -176,6 +185,12 @@ mod uri {
         })
     }
 
+    pub fn remove_prefix<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+        match s.get(..prefix.len()) {
+            Some(p) if p == prefix => Some(&s[prefix.len()..]),
+            _ => None,
+        }
+    }
 }
 
 mod router {
