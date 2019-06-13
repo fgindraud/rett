@@ -53,12 +53,22 @@ struct State {
     database: RefCell<relations::Database>,
 }
 
+enum FromRequestError {
+    NoMatch(Request<Body>),
+    BadRequest,
+}
+impl<E: std::error::Error> From<E> for FromRequestError {
+    fn from(_: E) -> Self {
+        FromRequestError::BadRequest
+    }
+}
+
 trait Page
 where
     Self: Sized,
 {
     fn to_url(&self) -> String;
-    fn from_request(request: Request<Body>) -> Result<Self, Request<Body>>;
+    fn from_request(request: Request<Body>) -> Result<Self, FromRequestError>;
 }
 
 struct DisplayElement {
@@ -76,22 +86,20 @@ impl Page for DisplayElement {
         b.optional_entry("link_tag", self.link_tag);
         b.build()
     }
-    fn from_request(request: Request<Body>) -> Result<Self, Request<Body>> {
-        if request.method() == &Method::GET {
-            if let Some(index) = uri::remove_prefix(request.uri().path(), "/element/")
-                .and_then(|s| s.parse::<relations::Index>().ok())
-            {
-                //FIXME return no-match | error | matched
-                return Ok(DisplayElement {
-                    index: index,
-                    //FIXME parse query.
-                    link_from: None,
-                    link_to: None,
-                    link_tag: None,
-                });
-            }
+    fn from_request(request: Request<Body>) -> Result<Self, FromRequestError> {
+        if let (&Method::GET, Some(s)) = (
+            request.method(),
+            uri::remove_prefix(request.uri().path(), "/element/"),
+        ) {
+            return Ok(DisplayElement {
+                index: s.parse()?,
+                //FIXME parse query.
+                link_from: None,
+                link_to: None,
+                link_tag: None,
+            });
         }
-        Err(request)
+        Err(FromRequestError::NoMatch(request))
     }
 }
 
