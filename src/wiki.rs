@@ -57,11 +57,11 @@ struct State {
 
 enum FromRequestError {
     NoMatch(Request<Body>),
-    BadRequest,
+    BadRequest(Box<std::error::Error>),
 }
-impl<E: std::error::Error> From<E> for FromRequestError {
-    fn from(_: E) -> Self {
-        FromRequestError::BadRequest
+impl<E: Into<Box<std::error::Error>>> From<E> for FromRequestError {
+    fn from(e: E) -> Self {
+        FromRequestError::BadRequest(e.into())
     }
 }
 
@@ -93,12 +93,12 @@ impl Page for DisplayElement {
             request.method(),
             utils::remove_prefix(request.uri().path(), "/element/"),
         ) {
+            let query = uri::decode_optional_query_entries(request.uri().query())?;
             return Ok(DisplayElement {
                 index: s.parse()?,
-                //FIXME parse query.
-                link_from: None,
-                link_to: None,
-                link_tag: None,
+                link_from: query.get("link_from").map(|s| s.parse()).transpose()?,
+                link_to: query.get("link_to").map(|s| s.parse()).transpose()?,
+                link_tag: query.get("link_tag").map(|s| s.parse()).transpose()?,
             });
         }
         Err(FromRequestError::NoMatch(request))
@@ -111,6 +111,7 @@ mod uri {
     use relations;
     use std::borrow::Cow;
     use std::fmt::{self, Write};
+    use utils::Map;
 
     /// Convertible to something printable in a query string
     pub trait ToQueryDisplayable {
@@ -172,27 +173,50 @@ mod uri {
         }
     }
 
-    pub struct QueryDecodingErrors;
-
-    pub fn decoded_query_entries<'a>(
-        query: &'a str,
-    ) -> impl Iterator<Item = Result<(Cow<'a, str>, Cow<'a, str>), QueryDecodingErrors>> {
-        query.split('&').map(|entry| {
-            let mut it = entry.split('=');
-            let fields = [it.next(), it.next(), it.next()];
-            match fields {
-                [Some(key), Some(value), None] => {
-                    let decode = |s| percent_decode(s).decode_utf8();
-                    match (decode(key.as_bytes()), decode(value.as_bytes())) {
-                        (Ok(key), Ok(value)) => Ok((key, value)),
-                        _ => Err(QueryDecodingErrors),
-                    }
-                }
-                _ => Err(QueryDecodingErrors),
-            }
-        })
+    #[derive(Debug)]
+    pub enum QueryDecodingError {
+        Utf8,
+        Structure,
     }
+    impl fmt::Display for QueryDecodingError {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                QueryDecodingError::Utf8 => "query is not valid utf8".fmt(f),
+                QueryDecodingError::Structure => "bad query structure".fmt(f),
+            }
+        }
+    }
+    impl std::error::Error for QueryDecodingError {}
 
+    pub fn decode_query_entries<'a>(
+        raw_query: &'a str,
+    ) -> Result<Map<Cow<'a, str>, Cow<'a, str>>, QueryDecodingError> {
+        raw_query
+            .split('&')
+            .map(|entry| {
+                let mut it = entry.split('=');
+                let fields = [it.next(), it.next(), it.next()];
+                match fields {
+                    [Some(key), Some(value), None] => {
+                        let decode = |s| percent_decode(s).decode_utf8();
+                        match (decode(key.as_bytes()), decode(value.as_bytes())) {
+                            (Ok(key), Ok(value)) => Ok((key, value)),
+                            _ => Err(QueryDecodingError::Utf8),
+                        }
+                    }
+                    _ => Err(QueryDecodingError::Structure),
+                }
+            })
+            .collect()
+    }
+    pub fn decode_optional_query_entries<'a>(
+        raw_query: Option<&'a str>,
+    ) -> Result<Map<Cow<'a, str>, Cow<'a, str>>, QueryDecodingError> {
+        match raw_query {
+            Some(s) => decode_query_entries(s),
+            None => Ok(Map::new()),
+        }
+    }
 }
 
 mod router {

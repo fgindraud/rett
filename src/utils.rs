@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::iter::FromIterator;
 use std::ops::Deref;
 
@@ -37,9 +38,16 @@ pub struct Map<K: Ord, V> {
     inner: Vec<(K, V)>,
 }
 impl<K: Ord, V> Map<K, V> {
-    pub fn get(&self, k: &K) -> Option<&V> {
+    pub fn new() -> Self {
+        Map { inner: Vec::new() }
+    }
+    pub fn get<Q>(&self, k: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         self.inner
-            .binary_search_by_key(&k, |p| &p.0)
+            .binary_search_by_key(&k, |p| p.0.borrow())
             .map(|index| &self.inner[index].1)
             .ok()
     }
@@ -61,8 +69,7 @@ impl<K: Ord, V> FromIterator<(K, V)> for Map<K, V> {
     where
         T: IntoIterator<Item = (K, V)>,
     {
-        let v: Vec<(K, V)> = FromIterator::from_iter(iter);
-        Map::from(v)
+        Map::from(Vec::from_iter(iter))
     }
 }
 
