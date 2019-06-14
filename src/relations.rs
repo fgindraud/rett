@@ -1,8 +1,8 @@
-use std;
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::marker::PhantomData;
+use utils::Set;
 
 /// Error type for graph operations
 #[derive(Debug, Eq, PartialEq)]
@@ -254,10 +254,6 @@ impl<'a> RelationRefSet<'a> {
     }
 }
 
-/******************************************************************************
- * Utils.
- */
-
 /// Vector where elements never change indexes. Removal generate holes.
 struct SlotVec<T> {
     inner: Vec<Option<T>>,
@@ -302,36 +298,6 @@ impl<T> std::ops::Index<usize> for SlotVec<T> {
 impl<T> std::ops::IndexMut<usize> for SlotVec<T> {
     fn index_mut(&mut self, i: usize) -> &mut Self::Output {
         self.get_mut(i).unwrap()
-    }
-}
-
-/// Vector with sorted elements and set api.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Set<T: Ord> {
-    inner: Vec<T>,
-}
-impl<T: Ord> Set<T> {
-    pub fn new() -> Self {
-        Set { inner: Vec::new() }
-    }
-    pub fn contains(&self, e: &T) -> bool {
-        self.inner.binary_search(e).is_ok()
-    }
-    pub fn insert(&mut self, e: T) {
-        if let Err(insertion_index) = self.inner.binary_search(&e) {
-            self.inner.insert(insertion_index, e)
-        }
-    }
-    pub fn remove(&mut self, e: &T) {
-        if let Ok(index) = self.inner.binary_search(e) {
-            self.inner.remove(index);
-        }
-    }
-}
-impl<T: Ord> std::ops::Deref for Set<T> {
-    type Target = [T];
-    fn deref(&self) -> &[T] {
-        self.inner.deref()
     }
 }
 

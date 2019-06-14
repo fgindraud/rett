@@ -8,6 +8,9 @@ extern crate tokio;
 #[macro_use]
 extern crate clap; // Command line parser
 
+/// Common utilities
+mod utils;
+
 /// Knowledge database as a set of sentences.
 mod relations;
 use relations::Database;
