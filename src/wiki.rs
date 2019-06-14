@@ -7,7 +7,9 @@ use std::cell::RefCell;
 use std::path::Path;
 
 use horrorshow::{self, Render, RenderOnce, Template};
+
 use relations;
+use utils;
 
 pub fn run(addr: &str, database_file: &Path) {
     let addr = addr.parse().expect("Address::parse");
@@ -89,7 +91,7 @@ impl Page for DisplayElement {
     fn from_request(request: Request<Body>) -> Result<Self, FromRequestError> {
         if let (&Method::GET, Some(s)) = (
             request.method(),
-            uri::remove_prefix(request.uri().path(), "/element/"),
+            utils::remove_prefix(request.uri().path(), "/element/"),
         ) {
             return Ok(DisplayElement {
                 index: s.parse()?,
@@ -111,7 +113,7 @@ mod uri {
     use std::fmt::{self, Write};
 
     /// Convertible to something printable in a query string
-    trait ToQueryDisplayable {
+    pub trait ToQueryDisplayable {
         // This trait is an optimization over encode(to_string(T)) for some T.
         type Output: fmt::Display;
         fn to_query_displayable(&self) -> Self::Output;
@@ -170,10 +172,8 @@ mod uri {
         }
     }
 
-    enum QueryDecodingErrors {
-        EqualDelimiter, // Delimiter is missing or more than one.
-        Utf8Error,      // Content is invalid Utf8 byte sequence after decoding.
-    }
+    pub struct QueryDecodingErrors;
+
     pub fn decoded_query_entries<'a>(
         query: &'a str,
     ) -> impl Iterator<Item = Result<(Cow<'a, str>, Cow<'a, str>), QueryDecodingErrors>> {
@@ -185,20 +185,14 @@ mod uri {
                     let decode = |s| percent_decode(s).decode_utf8();
                     match (decode(key.as_bytes()), decode(value.as_bytes())) {
                         (Ok(key), Ok(value)) => Ok((key, value)),
-                        _ => Err(QueryDecodingErrors::Utf8Error),
+                        _ => Err(QueryDecodingErrors),
                     }
                 }
-                _ => Err(QueryDecodingErrors::EqualDelimiter),
+                _ => Err(QueryDecodingErrors),
             }
         })
     }
 
-    pub fn remove_prefix<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-        match s.get(..prefix.len()) {
-            Some(p) if p == prefix => Some(&s[prefix.len()..]),
-            _ => None,
-        }
-    }
 }
 
 mod router {

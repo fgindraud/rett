@@ -1,4 +1,7 @@
-/// Vector with sorted elements and set api.
+use std::iter::FromIterator;
+use std::ops::Deref;
+
+/// Set based on a sorted vector.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Set<T: Ord> {
     inner: Vec<T>,
@@ -21,7 +24,7 @@ impl<T: Ord> Set<T> {
         }
     }
 }
-impl<T: Ord> std::ops::Deref for Set<T> {
+impl<T: Ord> Deref for Set<T> {
     type Target = [T];
     fn deref(&self) -> &[T] {
         self.inner.deref()
@@ -41,9 +44,32 @@ impl<K: Ord, V> Map<K, V> {
             .ok()
     }
 }
-impl<K: Ord, V> std::ops::Deref for Map<K, V> {
+impl<K: Ord, V> Deref for Map<K, V> {
     type Target = [(K, V)];
     fn deref(&self) -> &[(K, V)] {
         self.inner.deref()
+    }
+}
+impl<K: Ord, V> From<Vec<(K, V)>> for Map<K, V> {
+    fn from(mut v: Vec<(K, V)>) -> Self {
+        v.sort_unstable_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
+        Map { inner: v }
+    }
+}
+impl<K: Ord, V> FromIterator<(K, V)> for Map<K, V> {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = (K, V)>,
+    {
+        let v: Vec<(K, V)> = FromIterator::from_iter(iter);
+        Map::from(v)
+    }
+}
+
+/// Remove prefix and return tail of string if successful
+pub fn remove_prefix<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    match s.get(..prefix.len()) {
+        Some(p) if p == prefix => Some(&s[prefix.len()..]),
+        _ => None,
     }
 }
