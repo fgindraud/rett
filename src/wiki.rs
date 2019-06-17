@@ -1,59 +1,85 @@
 use futures::{future, Future};
-use hyper::service::service_fn;
+use hyper::service::service_fn_ok;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use tokio::runtime::current_thread;
 
 use std::cell::RefCell;
 use std::io;
 use std::path::Path;
-use std::sync::RwLock;
+use std::rc::Rc;
 
 use horrorshow::{self, Render, RenderOnce, Template};
 
-use relations::{self, Database};
+use relations;
 use utils;
 
-pub fn run(addr: &str, database_file: &Path) {
-    let addr = addr.parse().expect("Address::parse");
+type DatabaseLock = RefCell<relations::Database>;
 
-    let database = ::read_database_from_file(database_file);
-    let database = RwLock::new(database);
-
-    let pages = [page_handler::<DisplayElement>];
-
-    let server = {
-        let service_handler = |request| route_request(request, &database, pages.iter());
-        Server::bind(&addr)
-            .executor(current_thread::TaskExecutor::current())
-            .serve(move || service_fn(service_handler)) // requires Service to be 'static lifetime'd
-            .map_err(|e| panic!("Server error: {}", e))
-    };
-
-    current_thread::block_on_all(server).expect("Failed");
+/// Interface for a wiki page.
+trait Page
+where
+    Self: Sized,
+{
+    fn to_url(&self) -> String;
+    fn from_request(request: Request<Body>) -> Result<Self, PageFromRequestError>;
+    fn generate_response(self, db: &DatabaseLock) -> Response<Body>;
 }
 
+/// Error code used for routing.
 enum PageFromRequestError {
     NoMatch(Request<Body>),
     BadRequest(Box<std::error::Error>),
 }
+/// Convenience conversion which allows to use '?' in from_request() implementations.
 impl<E: Into<Box<std::error::Error>>> From<E> for PageFromRequestError {
     fn from(e: E) -> Self {
         PageFromRequestError::BadRequest(e.into())
     }
 }
 
+/// Entry point, run the wiki server.
+pub fn run(addr: &str, database_file: &Path) {
+    let addr = addr.parse().expect("Address::parse");
+
+    let database = ::read_database_from_file(database_file);
+    let database = Rc::new(RefCell::new(database));
+
+    let create_service = || {
+        let database = database.clone();
+        service_fn_ok(move |request| {
+            // Move cloned rc ref in this scope.
+            eprintln!("Request: {:?}", request);
+            let response = process_request(request, &database, PAGES.iter());
+            eprintln!("Response: {:?}", response);
+            response
+        })
+    };
+    let server = Server::bind(&addr)
+        .executor(current_thread::TaskExecutor::current())
+        .serve(create_service)
+        .map_err(|e| panic!("Server error: {}", e));
+
+    current_thread::block_on_all(server).expect("Failed");
+}
+
+/// All page types must be registered here.
+const PAGES: [PageHandlerFn; 1] = [page_handler::<DisplayElement>];
+type PageHandlerFn =
+    fn(Request<Body>, &DatabaseLock) -> Result<Response<Body>, PageFromRequestError>;
+
 fn page_handler<P: Page>(
     request: Request<Body>,
-    db: &RwLock<Database>,
-) -> Result<ResponseFuture, PageFromRequestError> {
+    db: &DatabaseLock,
+) -> Result<Response<Body>, PageFromRequestError> {
     P::from_request(request).map(|p| p.generate_response(db))
 }
 
-fn route_request<I>(request: Request<Body>, db: &RwLock<Database>, handlers: I) -> ResponseFuture
+/// Apply the first matching handler, or generate an error reponse (400 or 404).
+fn process_request<I>(request: Request<Body>, db: &DatabaseLock, handlers: I) -> Response<Body>
 where
     I: Iterator,
     <I as Iterator>::Item:
-        Fn(Request<Body>, &RwLock<Database>) -> Result<ResponseFuture, PageFromRequestError>,
+        Fn(Request<Body>, &DatabaseLock) -> Result<Response<Body>, PageFromRequestError>,
 {
     // Apply handlers until match or BadRequest.
     let final_state = handlers.fold(
@@ -66,19 +92,14 @@ where
     // Select final response
     match final_state {
         Ok(response) => response,
-        Err(e) => {
-            let response = match e {
-                PageFromRequestError::NoMatch(_) => Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Body::empty())
-                    .unwrap(),
-                PageFromRequestError::BadRequest(e) => Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from(e.to_string()))
-                    .unwrap(),
-            };
-            Box::new(future::ok(response))
-        }
+        Err(PageFromRequestError::NoMatch(_)) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap(),
+        Err(PageFromRequestError::BadRequest(e)) => Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(e.to_string()))
+            .unwrap(),
     }
 }
 
@@ -102,19 +123,7 @@ where
  * Removal TODO
  */
 
-struct State {
-    database: RefCell<relations::Database>,
-}
-
-trait Page
-where
-    Self: Sized,
-{
-    fn to_url(&self) -> String;
-    fn from_request(request: Request<Body>) -> Result<Self, PageFromRequestError>;
-    fn generate_response(self, db: &RwLock<Database>) -> ResponseFuture;
-}
-
+/// Display an element.
 struct DisplayElement {
     index: relations::Index,
     // Temporary selection for link creation
@@ -145,13 +154,12 @@ impl Page for DisplayElement {
         }
         Err(PageFromRequestError::NoMatch(request))
     }
-    fn generate_response(self, _db: &RwLock<Database>) -> ResponseFuture {
-        Box::new(future::ok(
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap(),
-        ))
+    fn generate_response(self, _db: &DatabaseLock) -> Response<Body> {
+        //TODO continue here
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap()
     }
 }
 
