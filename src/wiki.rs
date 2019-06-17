@@ -1,34 +1,85 @@
-use hyper::rt::Future;
-use hyper::service::service_fn_ok;
-use hyper::{Body, Method, Request, Response, Server};
+use futures::{future, Future};
+use hyper::service::service_fn;
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use tokio::runtime::current_thread;
 
 use std::cell::RefCell;
+use std::io;
 use std::path::Path;
+use std::sync::RwLock;
 
 use horrorshow::{self, Render, RenderOnce, Template};
 
-use relations;
+use relations::{self, Database};
 use utils;
 
 pub fn run(addr: &str, database_file: &Path) {
     let addr = addr.parse().expect("Address::parse");
 
     let database = ::read_database_from_file(database_file);
+    let database = RwLock::new(database);
 
-    // TODO use hyper send_file example to re-add static files.
-    // Routing must be done on req.uri().(method, path).
-    // Use a manual small parser lib ?
-    // Introduce a ElementDisplayUrl with a parse method ?
+    let pages = [page_handler::<DisplayElement>];
 
-    let new_service = || service_fn_ok(|_req| Response::new(Body::from("Blah")));
+    let server = {
+        let service_handler = |request| route_request(request, &database, pages.iter());
+        Server::bind(&addr)
+            .executor(current_thread::TaskExecutor::current())
+            .serve(move || service_fn(service_handler)) // requires Service to be 'static lifetime'd
+            .map_err(|e| panic!("Server error: {}", e))
+    };
 
-    let server = Server::bind(&addr)
-        .executor(current_thread::TaskExecutor::current())
-        .serve(new_service)
-        .map_err(|e| panic!("Server error: {}", e));
+    current_thread::block_on_all(server).expect("Failed");
+}
 
-    current_thread::block_on_all(server).expect("Failed")
+enum PageFromRequestError {
+    NoMatch(Request<Body>),
+    BadRequest(Box<std::error::Error>),
+}
+impl<E: Into<Box<std::error::Error>>> From<E> for PageFromRequestError {
+    fn from(e: E) -> Self {
+        PageFromRequestError::BadRequest(e.into())
+    }
+}
+
+fn page_handler<P: Page>(
+    request: Request<Body>,
+    db: &RwLock<Database>,
+) -> Result<ResponseFuture, PageFromRequestError> {
+    P::from_request(request).map(|p| p.generate_response(db))
+}
+
+fn route_request<I>(request: Request<Body>, db: &RwLock<Database>, handlers: I) -> ResponseFuture
+where
+    I: Iterator,
+    <I as Iterator>::Item:
+        Fn(Request<Body>, &RwLock<Database>) -> Result<ResponseFuture, PageFromRequestError>,
+{
+    // Apply handlers until match or BadRequest.
+    let final_state = handlers.fold(
+        Err(PageFromRequestError::NoMatch(request)),
+        |state, handler| match state {
+            Err(PageFromRequestError::NoMatch(request)) => handler(request, db),
+            state => state,
+        },
+    );
+    // Select final response
+    match final_state {
+        Ok(response) => response,
+        Err(e) => {
+            let response = match e {
+                PageFromRequestError::NoMatch(_) => Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::empty())
+                    .unwrap(),
+                PageFromRequestError::BadRequest(e) => Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(e.to_string()))
+                    .unwrap(),
+            };
+            Box::new(future::ok(response))
+        }
+    }
 }
 
 /* Design:
@@ -55,22 +106,13 @@ struct State {
     database: RefCell<relations::Database>,
 }
 
-enum FromRequestError {
-    NoMatch(Request<Body>),
-    BadRequest(Box<std::error::Error>),
-}
-impl<E: Into<Box<std::error::Error>>> From<E> for FromRequestError {
-    fn from(e: E) -> Self {
-        FromRequestError::BadRequest(e.into())
-    }
-}
-
 trait Page
 where
     Self: Sized,
 {
     fn to_url(&self) -> String;
-    fn from_request(request: Request<Body>) -> Result<Self, FromRequestError>;
+    fn from_request(request: Request<Body>) -> Result<Self, PageFromRequestError>;
+    fn generate_response(self, db: &RwLock<Database>) -> ResponseFuture;
 }
 
 struct DisplayElement {
@@ -88,7 +130,7 @@ impl Page for DisplayElement {
         b.optional_entry("link_tag", self.link_tag);
         b.build()
     }
-    fn from_request(request: Request<Body>) -> Result<Self, FromRequestError> {
+    fn from_request(request: Request<Body>) -> Result<Self, PageFromRequestError> {
         if let (&Method::GET, Some(s)) = (
             request.method(),
             utils::remove_prefix(request.uri().path(), "/element/"),
@@ -101,7 +143,15 @@ impl Page for DisplayElement {
                 link_tag: query.get("link_tag").map(|s| s.parse()).transpose()?,
             });
         }
-        Err(FromRequestError::NoMatch(request))
+        Err(PageFromRequestError::NoMatch(request))
+    }
+    fn generate_response(self, _db: &RwLock<Database>) -> ResponseFuture {
+        Box::new(future::ok(
+            Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::empty())
+                .unwrap(),
+        ))
     }
 }
 
@@ -217,29 +267,4 @@ mod uri {
             None => Ok(Map::new()),
         }
     }
-}
-
-mod router {
-    // TODO think more about design there
-    use hyper::Method;
-    use hyper::Uri;
-
-    pub trait FromUri<R> {
-        fn from_uri(uri: &Uri) -> Option<R>
-        where
-            Self: Sized;
-    }
-
-    pub struct Router<R> {
-        routes: Vec<Box<FromUri<R>>>,
-    }
-
-    impl<R> Router<R> {
-        pub fn new() -> Self {
-            Router { routes: Vec::new() }
-        }
-    }
-
-    // URLs are percent_encoded.
-    // Use simple split on hyper::Uri::path, then use
 }

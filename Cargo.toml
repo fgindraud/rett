@@ -7,6 +7,8 @@ description = "Tool to store, manipulate and display relational information"
 [dependencies]
 clap = "2"
 horrorshow = "0.6"
-hyper = "0.12.24"
+hyper = "0.12.30"
 percent-encoding = "1"
+# Versions from hyper
 tokio = { version = "^0.1.14", default-features = false, features = ["rt-full"] }
+futures = "^0.1.21"
