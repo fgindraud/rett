@@ -3,13 +3,14 @@ use hyper::service::service_fn_ok;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use tokio::runtime::current_thread;
 
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
 use horrorshow::{self, Render, RenderOnce, Template};
 
+use self::uri::PathFormat;
 use relations;
 use utils;
 
@@ -180,7 +181,7 @@ impl<'r, T: Into<Cow<'r, str>>> From<T> for StaticAsset<'r> {
 }
 impl<'r> Page<'r> for StaticAsset<'r> {
     fn to_url(&self) -> String {
-        format!("/static/{}", self.path)
+        ("static", self.path.borrow()).to_path()
     }
     fn from_request(request: &'r Request<Body>) -> Result<Self, PageFromRequestError> {
         match (
@@ -236,6 +237,59 @@ mod uri {
     use std::borrow::Cow;
     use std::fmt::{self, Write};
     use utils::Map;
+
+    #[derive(Debug)]
+    pub enum ParsingError {
+        Utf8,
+        Structure,
+    }
+    impl fmt::Display for ParsingError {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                ParsingError::Utf8 => "query is not valid utf8".fmt(f),
+                ParsingError::Structure => "bad query structure".fmt(f),
+            }
+        }
+    }
+
+    impl std::error::Error for ParsingError {}
+    pub trait PathFormat<'p>
+    where
+        Self: Sized + 'p,
+    {
+        type Output: fmt::Display;
+        fn to_path(&self) -> Self::Output;
+        fn from_path(path: &'p str) -> Result<Self, ParsingError>;
+    }
+    impl<'p> PathFormat<'p> for &'p str {
+        type Output = Self;
+        fn to_path(&self) -> Self::Output {
+            *self
+        }
+        fn from_path(path: &'p str) -> Result<Self, ParsingError> {
+            Ok(path)
+        }
+    }
+    impl<'p, T0, T1> PathFormat<'p> for (T0, T1)
+    where
+        T0: PathFormat<'p>,
+        T1: PathFormat<'p>,
+    {
+        type Output = String;
+        fn to_path(&self) -> Self::Output {
+            format!("/{}/{}", self.0.to_path(), self.1.to_path())
+        }
+        fn from_path(path: &'p str) -> Result<Self, ParsingError> {
+            let mut it = path.split('/');
+            let fields = [it.next(), it.next(), it.next(), it.next()];
+            match fields {
+                [Some(""), Some(t0), Some(t1), None] => {
+                    Ok((T0::from_path(t0)?, T1::from_path(t1)?))
+                }
+                _ => Err(ParsingError::Structure),
+            }
+        }
+    }
 
     /// Convertible to something printable in a query string
     pub trait QueryFormat {
@@ -297,24 +351,10 @@ mod uri {
         }
     }
 
-    #[derive(Debug)]
-    pub enum QueryDecodingError {
-        Utf8,
-        Structure,
-    }
-    impl fmt::Display for QueryDecodingError {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            match self {
-                QueryDecodingError::Utf8 => "query is not valid utf8".fmt(f),
-                QueryDecodingError::Structure => "bad query structure".fmt(f),
-            }
-        }
-    }
-    impl std::error::Error for QueryDecodingError {}
-
+    /// Create a Map: str -> str from a query string.
     pub fn decode_query_entries<'a>(
         raw_query: &'a str,
-    ) -> Result<Map<Cow<'a, str>, Cow<'a, str>>, QueryDecodingError> {
+    ) -> Result<Map<Cow<'a, str>, Cow<'a, str>>, ParsingError> {
         raw_query
             .split('&')
             .map(|entry| {
@@ -322,23 +362,33 @@ mod uri {
                 let fields = [it.next(), it.next(), it.next()];
                 match fields {
                     [Some(key), Some(value), None] => {
-                        let decode = |s| percent_decode(s).decode_utf8();
-                        match (decode(key.as_bytes()), decode(value.as_bytes())) {
-                            (Ok(key), Ok(value)) => Ok((key, value)),
-                            _ => Err(QueryDecodingError::Utf8),
-                        }
+                        let decode = |s| {
+                            percent_decode(s)
+                                .decode_utf8()
+                                .map_err(|_| ParsingError::Utf8)
+                        };
+                        Ok((decode(key.as_bytes())?, decode(value.as_bytes())?))
                     }
-                    _ => Err(QueryDecodingError::Structure),
+                    _ => Err(ParsingError::Structure),
                 }
             })
             .collect()
     }
+    /// Create a Map: str -> str from a query string, or default with an empty map.
     pub fn decode_optional_query_entries<'a>(
         raw_query: Option<&'a str>,
-    ) -> Result<Map<Cow<'a, str>, Cow<'a, str>>, QueryDecodingError> {
+    ) -> Result<Map<Cow<'a, str>, Cow<'a, str>>, ParsingError> {
         match raw_query {
             Some(s) => decode_query_entries(s),
             None => Ok(Map::new()),
         }
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn test() {
+        assert_eq!("/a/b", ("a", "b").to_path());
+        let (a, b) = PathFormat::from_path("/a/b").unwrap();
+        assert_eq!((a, b), ("a", "b"))
     }
 }
