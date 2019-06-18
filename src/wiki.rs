@@ -1,4 +1,4 @@
-use futures::{future, Future};
+use hyper::rt::Future;
 use hyper::service::service_fn_ok;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use tokio::runtime::current_thread;

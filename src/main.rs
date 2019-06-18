@@ -1,7 +1,6 @@
 // Wiki
 #[macro_use]
 extern crate horrorshow; // HTML template engine
-extern crate futures;
 extern crate hyper;
 extern crate percent_encoding;
 extern crate tokio;
