@@ -3,6 +3,7 @@ use hyper::service::service_fn_ok;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use tokio::runtime::current_thread;
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::io;
 use std::path::Path;
@@ -63,7 +64,10 @@ pub fn run(addr: &str, database_file: &Path) {
 }
 
 /// All page types must be registered here.
-const PAGES: [PageHandlerFn; 1] = [page_handler::<DisplayElement>];
+const PAGES: [PageHandlerFn; 2] = [
+    page_handler::<DisplayElement>,
+    page_handler::<StaticAsset>, //
+];
 type PageHandlerFn =
     fn(Request<Body>, &DatabaseLock) -> Result<Response<Body>, PageFromRequestError>;
 
@@ -163,6 +167,63 @@ impl Page for DisplayElement {
     }
 }
 
+/// Static files.
+struct StaticAsset {
+    path: Cow<'static, str>,
+}
+impl Page for StaticAsset {
+    fn to_url(&self) -> String {
+        format!("/static/{}", self.path)
+    }
+    fn from_request(request: Request<Body>) -> Result<Self, PageFromRequestError> {
+        if let (&Method::GET, Some(s)) = (
+            request.method(),
+            utils::remove_prefix(request.uri().path(), "/static/"),
+        ) {
+            return Ok(StaticAsset {
+                path: s.to_string().into(),
+            });
+        }
+        Err(PageFromRequestError::NoMatch(request))
+    }
+    fn generate_response(self, _db: &DatabaseLock) -> Response<Body> {
+        match ASSETS.iter().find(|asset| asset.path == self.path) {
+            Some(asset) => Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", asset.mime)
+                .header("Cache-Control", "public, max-age=3600") // Allow cache for 1h
+                .body(Body::from(asset.content))
+                .unwrap(),
+            None => Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::empty())
+                .unwrap(),
+        }
+    }
+}
+struct AssetDefinition {
+    path: &'static str,
+    mime: &'static str,
+    content: &'static str,
+}
+const ASSETS: [AssetDefinition; 3] = [
+    AssetDefinition {
+        path: "style.css",
+        mime: "text/css; charset=utf8",
+        content: include_str!("wiki_assets/style.css"),
+    },
+    AssetDefinition {
+        path: "client.js",
+        mime: "application/javascript",
+        content: include_str!("wiki_assets/client.js"),
+    },
+    AssetDefinition {
+        path: "jquery.js",
+        mime: "application/javascript",
+        content: include_str!("wiki_assets/jquery.js"),
+    },
+];
+
 /// Uri related utilities
 mod uri {
     use percent_encoding::{percent_decode, utf8_percent_encode, PercentEncode, QUERY_ENCODE_SET};
@@ -172,20 +233,20 @@ mod uri {
     use utils::Map;
 
     /// Convertible to something printable in a query string
-    pub trait ToQueryDisplayable {
+    pub trait QueryFormat {
         // This trait is an optimization over encode(to_string(T)) for some T.
         type Output: fmt::Display;
-        fn to_query_displayable(&self) -> Self::Output;
+        fn to_query_format(&self) -> Self::Output;
     }
-    impl ToQueryDisplayable for relations::Index {
+    impl QueryFormat for relations::Index {
         type Output = relations::Index;
-        fn to_query_displayable(&self) -> Self::Output {
+        fn to_query_format(&self) -> Self::Output {
             *self // Integers do not need URL-encoding
         }
     }
-    impl<'a> ToQueryDisplayable for &'a str {
+    impl<'a> QueryFormat for &'a str {
         type Output = PercentEncode<'a, QUERY_ENCODE_SET>;
-        fn to_query_displayable(&self) -> Self::Output {
+        fn to_query_format(&self) -> Self::Output {
             utf8_percent_encode(self, QUERY_ENCODE_SET) // Text needs URL-encoding
         }
     }
@@ -207,23 +268,23 @@ mod uri {
         }
         pub fn entry<K, V>(&mut self, key: K, value: V)
         where
-            K: ToQueryDisplayable,
-            V: ToQueryDisplayable,
+            K: QueryFormat,
+            V: QueryFormat,
         {
             write!(
                 &mut self.path_and_query,
                 "{}{}={}",
                 self.query_prefix_char,
-                key.to_query_displayable(),
-                value.to_query_displayable()
+                key.to_query_format(),
+                value.to_query_format()
             )
             .unwrap();
             self.query_prefix_char = '&' // Entries are ?first=v&second=v&...
         }
         pub fn optional_entry<K, V>(&mut self, key: K, value: Option<V>)
         where
-            K: ToQueryDisplayable,
-            V: ToQueryDisplayable,
+            K: QueryFormat,
+            V: QueryFormat,
         {
             if let Some(v) = value {
                 self.entry(key, v)

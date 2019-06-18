@@ -126,7 +126,7 @@ impl fmt::Display for DisplayPageUrl {
 }
 
 fn display_page<'a>(r: Ref<'a, Element>) -> Response {
-    wiki_page("Title", html!{}, html!{})
+    wiki_page("Title", html! {}, html! {})
 }
 
 //// Elements associated to a type of objects are tagged with HTML classes. Get class name.
@@ -402,38 +402,3 @@ where
     };
     Response::html(template.into_string().unwrap())
 }
-
-/* Wiki external files.
- * Static files are much easier to edit as standalone.
- * TODO review use of jquery !
- * TODO use of doc.html ?
- */
-fn send_asset(path: &str) -> Response {
-    // FIXME in non debug use: .with_public_cache(3600)
-    match ASSETS.iter().filter(|asset| asset.path == path).next() {
-        Some(asset) => Response::from_data(asset.mime, asset.content),
-        None => Response::empty_404(),
-    }
-}
-struct Asset {
-    path: &'static str,
-    mime: &'static str,
-    content: &'static str,
-}
-const ASSETS: [Asset; 3] = [
-    Asset {
-        path: "style.css",
-        mime: "text/css",
-        content: include_str!("wiki_assets/style.css"),
-    },
-    Asset {
-        path: "client.js",
-        mime: "application/javascript",
-        content: include_str!("wiki_assets/client.js"),
-    },
-    Asset {
-        path: "jquery.js",
-        mime: "application/javascript",
-        content: include_str!("wiki_assets/jquery.js"),
-    },
-];
