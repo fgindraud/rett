@@ -27,7 +27,7 @@ where
     fn generate_response(self, state: &State) -> Response<Body>;
 }
 
-/// Error code used for routing.
+/// Error code used for routing. BadRequest is used to stop matching with an error.
 enum PageFromRequestError {
     NoMatch,
     BadRequest(Box<std::error::Error>),
@@ -78,20 +78,16 @@ fn page_handler<'r, P: Page<'r>>(
     P::from_request(request).map(|p| p.generate_response(state))
 }
 
-/*
-fn test(req: &Request<Body>, state: &State) -> Result<Response<Body>, PageFromRequestError> {
-    page_handler::<StaticAsset>(req, state)
-}
-
-const F0: fn(&Request<Body>, &State) -> Result<Response<Body>, PageFromRequestError> =
-    page_handler::<DisplayElement>;*/
-
 /// Apply the first matching handler, or generate an error reponse (400 or 404).
-fn process_request<'r, I>(request: &'r Request<Body>, state: &State, handlers: I) -> Response<Body>
+fn process_request<'r, 's, I>(
+    request: &'r Request<Body>,
+    state: &'s State,
+    handlers: I,
+) -> Response<Body>
 where
     I: Iterator,
     <I as Iterator>::Item:
-        Fn(&'r Request<Body>, &State) -> Result<Response<Body>, PageFromRequestError>,
+        Fn(&'r Request<Body>, &'s State) -> Result<Response<Body>, PageFromRequestError>,
 {
     for handler in handlers {
         match handler(request, state) {
