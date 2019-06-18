@@ -5,7 +5,6 @@ use tokio::runtime::current_thread;
 
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::io;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -14,21 +13,23 @@ use horrorshow::{self, Render, RenderOnce, Template};
 use relations;
 use utils;
 
-type DatabaseLock = RefCell<relations::Database>;
+struct State {
+    database: RefCell<relations::Database>,
+}
 
 /// Interface for a wiki page.
-trait Page
+trait Page<'r>
 where
-    Self: Sized,
+    Self: Sized + 'r,
 {
     fn to_url(&self) -> String;
-    fn from_request(request: Request<Body>) -> Result<Self, PageFromRequestError>;
-    fn generate_response(self, db: &DatabaseLock) -> Response<Body>;
+    fn from_request(request: &'r Request<Body>) -> Result<Self, PageFromRequestError>;
+    fn generate_response(self, state: &State) -> Response<Body>;
 }
 
 /// Error code used for routing.
 enum PageFromRequestError {
-    NoMatch(Request<Body>),
+    NoMatch,
     BadRequest(Box<std::error::Error>),
 }
 /// Convenience conversion which allows to use '?' in from_request() implementations.
@@ -43,16 +44,23 @@ pub fn run(addr: &str, database_file: &Path) {
     let addr = addr.parse().expect("Address::parse");
 
     let database = ::read_database_from_file(database_file);
-    let database = Rc::new(RefCell::new(database));
+    let state = Rc::new(State {
+        database: RefCell::new(database),
+    });
 
     let create_service = || {
-        let database = database.clone();
+        let state = state.clone();
         service_fn_ok(move |request| {
             // Move cloned rc ref in this scope.
+            let pages = [
+                page_handler::<DisplayElement>,
+                page_handler::<StaticAsset>, //
+            ];
             eprintln!("Request: {:?}", request);
-            let response = process_request(request, &database, PAGES.iter());
+            let response = process_request(&request, &state, pages.iter());
             eprintln!("Response: {:?}", response);
             response
+            //Response::builder().body(Body::empty()).unwrap()
         })
     };
     let server = Server::bind(&addr)
@@ -63,48 +71,44 @@ pub fn run(addr: &str, database_file: &Path) {
     current_thread::block_on_all(server).expect("Failed");
 }
 
-/// All page types must be registered here.
-const PAGES: [PageHandlerFn; 2] = [
-    page_handler::<DisplayElement>,
-    page_handler::<StaticAsset>, //
-];
-type PageHandlerFn =
-    fn(Request<Body>, &DatabaseLock) -> Result<Response<Body>, PageFromRequestError>;
-
-fn page_handler<P: Page>(
-    request: Request<Body>,
-    db: &DatabaseLock,
+fn page_handler<'r, P: Page<'r>>(
+    request: &'r Request<Body>,
+    state: &State,
 ) -> Result<Response<Body>, PageFromRequestError> {
-    P::from_request(request).map(|p| p.generate_response(db))
+    P::from_request(request).map(|p| p.generate_response(state))
 }
 
+/*
+fn test(req: &Request<Body>, state: &State) -> Result<Response<Body>, PageFromRequestError> {
+    page_handler::<StaticAsset>(req, state)
+}
+
+const F0: fn(&Request<Body>, &State) -> Result<Response<Body>, PageFromRequestError> =
+    page_handler::<DisplayElement>;*/
+
 /// Apply the first matching handler, or generate an error reponse (400 or 404).
-fn process_request<I>(request: Request<Body>, db: &DatabaseLock, handlers: I) -> Response<Body>
+fn process_request<'r, I>(request: &'r Request<Body>, state: &State, handlers: I) -> Response<Body>
 where
     I: Iterator,
     <I as Iterator>::Item:
-        Fn(Request<Body>, &DatabaseLock) -> Result<Response<Body>, PageFromRequestError>,
+        Fn(&'r Request<Body>, &State) -> Result<Response<Body>, PageFromRequestError>,
 {
-    // Apply handlers until match or BadRequest.
-    let final_state = handlers.fold(
-        Err(PageFromRequestError::NoMatch(request)),
-        |state, handler| match state {
-            Err(PageFromRequestError::NoMatch(request)) => handler(request, db),
-            state => state,
-        },
-    );
-    // Select final response
-    match final_state {
-        Ok(response) => response,
-        Err(PageFromRequestError::NoMatch(_)) => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::empty())
-            .unwrap(),
-        Err(PageFromRequestError::BadRequest(e)) => Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(e.to_string()))
-            .unwrap(),
+    for handler in handlers {
+        match handler(request, state) {
+            Ok(response) => return response,
+            Err(PageFromRequestError::NoMatch) => (),
+            Err(PageFromRequestError::BadRequest(e)) => {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(e.to_string()))
+                    .unwrap();
+            }
+        }
     }
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Body::empty())
+        .unwrap()
 }
 
 /* Design:
@@ -135,7 +139,7 @@ struct DisplayElement {
     link_to: Option<relations::Index>,
     link_tag: Option<relations::Index>,
 }
-impl Page for DisplayElement {
+impl<'r> Page<'r> for DisplayElement {
     fn to_url(&self) -> String {
         let mut b = uri::PathQueryBuilder::new(format!("/element/{}", self.index));
         b.optional_entry("link_from", self.link_from);
@@ -143,22 +147,24 @@ impl Page for DisplayElement {
         b.optional_entry("link_tag", self.link_tag);
         b.build()
     }
-    fn from_request(request: Request<Body>) -> Result<Self, PageFromRequestError> {
-        if let (&Method::GET, Some(s)) = (
+    fn from_request(request: &'r Request<Body>) -> Result<Self, PageFromRequestError> {
+        match (
             request.method(),
             utils::remove_prefix(request.uri().path(), "/element/"),
         ) {
-            let query = uri::decode_optional_query_entries(request.uri().query())?;
-            return Ok(DisplayElement {
-                index: s.parse()?,
-                link_from: query.get("link_from").map(|s| s.parse()).transpose()?,
-                link_to: query.get("link_to").map(|s| s.parse()).transpose()?,
-                link_tag: query.get("link_tag").map(|s| s.parse()).transpose()?,
-            });
+            (&Method::GET, Some(index)) => {
+                let query = uri::decode_optional_query_entries(request.uri().query())?;
+                Ok(DisplayElement {
+                    index: index.parse()?,
+                    link_from: query.get("link_from").map(|s| s.parse()).transpose()?,
+                    link_to: query.get("link_to").map(|s| s.parse()).transpose()?,
+                    link_tag: query.get("link_tag").map(|s| s.parse()).transpose()?,
+                })
+            }
+            _ => Err(PageFromRequestError::NoMatch),
         }
-        Err(PageFromRequestError::NoMatch(request))
     }
-    fn generate_response(self, _db: &DatabaseLock) -> Response<Body> {
+    fn generate_response(self, _state: &State) -> Response<Body> {
         //TODO continue here
         Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -168,25 +174,28 @@ impl Page for DisplayElement {
 }
 
 /// Static files.
-struct StaticAsset {
-    path: Cow<'static, str>,
+struct StaticAsset<'r> {
+    path: Cow<'r, str>,
 }
-impl Page for StaticAsset {
+impl<'r, T: Into<Cow<'r, str>>> From<T> for StaticAsset<'r> {
+    fn from(v: T) -> Self {
+        StaticAsset { path: v.into() }
+    }
+}
+impl<'r> Page<'r> for StaticAsset<'r> {
     fn to_url(&self) -> String {
         format!("/static/{}", self.path)
     }
-    fn from_request(request: Request<Body>) -> Result<Self, PageFromRequestError> {
-        if let (&Method::GET, Some(s)) = (
+    fn from_request(request: &'r Request<Body>) -> Result<Self, PageFromRequestError> {
+        match (
             request.method(),
             utils::remove_prefix(request.uri().path(), "/static/"),
         ) {
-            return Ok(StaticAsset {
-                path: s.to_string().into(),
-            });
+            (&Method::GET, Some(path)) => Ok(path.into()),
+            _ => Err(PageFromRequestError::NoMatch),
         }
-        Err(PageFromRequestError::NoMatch(request))
     }
-    fn generate_response(self, _db: &DatabaseLock) -> Response<Body> {
+    fn generate_response(self, _state: &State) -> Response<Body> {
         match ASSETS.iter().find(|asset| asset.path == self.path) {
             Some(asset) => Response::builder()
                 .status(StatusCode::OK)
