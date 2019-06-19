@@ -3,39 +3,39 @@ use hyper::service::service_fn_ok;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use tokio::runtime::current_thread;
 
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use horrorshow::{self, Render, RenderOnce, Template};
+use horrorshow::{self, RenderOnce, Template, TemplateBuffer};
 
 use relations;
-use utils;
+use utils::remove_prefix;
 
 struct State {
     database: RefCell<relations::Database>,
 }
 
-/// Interface for a wiki page.
-trait Page<'r>
+/// Interface for an URL endpoint.
+trait EndPoint<'r>
 where
     Self: Sized + 'r,
 {
-    fn to_url(&self) -> String;
-    fn from_request(request: &'r Request<Body>) -> Result<Self, PageFromRequestError>;
+    fn url(&self) -> String;
+    fn from_request(request: &'r Request<Body>) -> Result<Self, FromRequestError>;
     fn generate_response(self, state: &State) -> Response<Body>;
 }
 
 /// Error code used for routing. BadRequest is used to stop matching with an error.
-enum PageFromRequestError {
+enum FromRequestError {
     NoMatch,
     BadRequest(Box<std::error::Error>),
 }
 /// Convenience conversion which allows to use '?' in from_request() implementations.
-impl<E: Into<Box<std::error::Error>>> From<E> for PageFromRequestError {
+impl<E: Into<Box<std::error::Error>>> From<E> for FromRequestError {
     fn from(e: E) -> Self {
-        PageFromRequestError::BadRequest(e.into())
+        FromRequestError::BadRequest(e.into())
     }
 }
 
@@ -52,12 +52,12 @@ pub fn run(addr: &str, database_file: &Path) {
         let state = state.clone();
         service_fn_ok(move |request| {
             // Move cloned rc ref in this scope.
-            let pages = [
-                page_handler::<DisplayElement>,
-                page_handler::<StaticAsset>, //
+            let handlers = [
+                end_point_handler::<DisplayElement>,
+                end_point_handler::<StaticAsset>, //
             ];
             eprintln!("Request: {:?}", request);
-            let response = process_request(&request, &state, pages.iter());
+            let response = process_request(&request, &state, handlers.iter());
             eprintln!("Response: {:?}", response);
             response
             //Response::builder().body(Body::empty()).unwrap()
@@ -71,11 +71,11 @@ pub fn run(addr: &str, database_file: &Path) {
     current_thread::block_on_all(server).expect("Failed");
 }
 
-fn page_handler<'r, P: Page<'r>>(
+fn end_point_handler<'r, E: EndPoint<'r>>(
     request: &'r Request<Body>,
     state: &State,
-) -> Result<Response<Body>, PageFromRequestError> {
-    P::from_request(request).map(|p| p.generate_response(state))
+) -> Result<Response<Body>, FromRequestError> {
+    E::from_request(request).map(|e| e.generate_response(state))
 }
 
 /// Apply the first matching handler, or generate an error reponse (400 or 404).
@@ -87,13 +87,13 @@ fn process_request<'r, 's, I>(
 where
     I: Iterator,
     <I as Iterator>::Item:
-        Fn(&'r Request<Body>, &'s State) -> Result<Response<Body>, PageFromRequestError>,
+        Fn(&'r Request<Body>, &'s State) -> Result<Response<Body>, FromRequestError>,
 {
     for handler in handlers {
         match handler(request, state) {
             Ok(response) => return response,
-            Err(PageFromRequestError::NoMatch) => (),
-            Err(PageFromRequestError::BadRequest(e)) => {
+            Err(FromRequestError::NoMatch) => (),
+            Err(FromRequestError::BadRequest(e)) => {
                 return Response::builder()
                     .status(StatusCode::BAD_REQUEST)
                     .body(Body::from(e.to_string()))
@@ -127,7 +127,7 @@ where
  * Removal TODO
  */
 
-/// Display an element.
+/// Display an element of the relation graph.
 struct DisplayElement {
     index: relations::Index,
     // Temporary selection for link creation
@@ -135,21 +135,18 @@ struct DisplayElement {
     link_to: Option<relations::Index>,
     link_tag: Option<relations::Index>,
 }
-impl<'r> Page<'r> for DisplayElement {
-    fn to_url(&self) -> String {
+impl<'r> EndPoint<'r> for DisplayElement {
+    fn url(&self) -> String {
         let mut b = uri::PathQueryBuilder::new(format!("/element/{}", self.index));
         b.optional_entry("link_from", self.link_from);
         b.optional_entry("link_to", self.link_to);
         b.optional_entry("link_tag", self.link_tag);
         b.build()
     }
-    fn from_request(request: &'r Request<Body>) -> Result<Self, PageFromRequestError> {
-        match (
-            request.method(),
-            utils::remove_prefix(request.uri().path(), "/element/"),
-        ) {
+    fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
+        match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => {
-                let query = uri::decode_optional_query_entries(request.uri().query())?;
+                let query = uri::decode_optional_query_entries(r.uri().query())?;
                 Ok(DisplayElement {
                     index: index.parse()?,
                     link_from: query.get("link_from").map(|s| s.parse()).transpose()?,
@@ -157,7 +154,7 @@ impl<'r> Page<'r> for DisplayElement {
                     link_tag: query.get("link_tag").map(|s| s.parse()).transpose()?,
                 })
             }
-            _ => Err(PageFromRequestError::NoMatch),
+            _ => Err(FromRequestError::NoMatch),
         }
     }
     fn generate_response(self, _state: &State) -> Response<Body> {
@@ -169,6 +166,41 @@ impl<'r> Page<'r> for DisplayElement {
     }
 }
 
+/// Generated wiki page final assembly. Adds the navigation bar, overall html structure.
+fn compose_wiki_page<T, N, C>(title: T, additional_nav_links: N, content: C) -> String
+where
+    T: RenderOnce,
+    N: RenderOnce,
+    C: RenderOnce,
+{
+    let template = html! {
+        : horrorshow::helper::doctype::HTML;
+        html {
+            head {
+                link(rel="stylesheet", type="text/css", href=StaticAsset::from("style.css").url());
+                script(src=StaticAsset::from("jquery.js").url()) {}
+                meta(name="viewport", content="width=device-width, initial-scale=1.0");
+                title : title;
+            }
+            body {
+                nav {
+                    a(href="/") : "Home";
+                    a(href="/create/atom", class="atom") : "Atom";
+                    a(href="/create/abstract", class="abstract") : "Abstract";
+                    : additional_nav_links;
+                    a(href="/all") : "All";
+                    // TODO other
+                }
+                main {
+                    : content;
+                }
+                script(src=StaticAsset::from("client.js").url()) {}
+            }
+        }
+    };
+    template.into_string().unwrap()
+}
+
 /// Static files.
 struct StaticAsset<'r> {
     path: Cow<'r, str>,
@@ -178,17 +210,14 @@ impl<'r, T: Into<Cow<'r, str>>> From<T> for StaticAsset<'r> {
         StaticAsset { path: v.into() }
     }
 }
-impl<'r> Page<'r> for StaticAsset<'r> {
-    fn to_url(&self) -> String {
+impl<'r> EndPoint<'r> for StaticAsset<'r> {
+    fn url(&self) -> String {
         format!("/static/{}", self.path)
     }
-    fn from_request(request: &'r Request<Body>) -> Result<Self, PageFromRequestError> {
-        match (
-            request.method(),
-            utils::remove_prefix(request.uri().path(), "/static/"),
-        ) {
+    fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
+        match (r.method(), remove_prefix(r.uri().path(), "/static/")) {
             (&Method::GET, Some(path)) => Ok(path.into()),
-            _ => Err(PageFromRequestError::NoMatch),
+            _ => Err(FromRequestError::NoMatch),
         }
     }
     fn generate_response(self, _state: &State) -> Response<Body> {
