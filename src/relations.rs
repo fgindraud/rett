@@ -40,9 +40,9 @@ pub enum Atom {
 /// If the second entity is omitted, this is a simple description.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Relation {
-    subject: Index,
-    descriptor: Index,
-    complement: Option<Index>,
+    pub subject: Index,
+    pub descriptor: Index,
+    pub complement: Option<Index>,
 }
 
 impl From<String> for Atom {
@@ -202,6 +202,9 @@ impl<'a, E> Ref<'a, E> {
     }
 }
 impl<'a> Ref<'a, Element> {
+    pub fn value(&self) -> &Element {
+        &self.data().value
+    }
     pub fn cases(&self) -> ElementRef<'a> {
         match self.data().value {
             Element::Abstract => ElementRef::Abstract(Ref::new(self.database, self.index)),

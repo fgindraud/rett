@@ -8,13 +8,19 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use horrorshow::{self, RenderOnce, Template, TemplateBuffer};
+use horrorshow::{self, RenderOnce, Template};
 
-use relations;
+use relations::{Atom, Database, Element, Index, Ref};
 use utils::remove_prefix;
 
+/******************************************************************************
+ * Wiki runtime system.
+ * Based on hyper/tokio, but uses the single threaded tokio runtime.
+ */
+
+/// Wiki web interface state.
 struct State {
-    database: RefCell<relations::Database>,
+    database: RefCell<Database>,
 }
 
 /// Interface for an URL endpoint.
@@ -107,6 +113,10 @@ where
         .unwrap()
 }
 
+/******************************************************************************
+ * Wiki page definitions.
+ */
+
 /* Design:
  *
  * In //:
@@ -129,11 +139,11 @@ where
 
 /// Display an element of the relation graph.
 struct DisplayElement {
-    index: relations::Index,
+    index: Index,
     // Temporary selection for link creation
-    link_from: Option<relations::Index>,
-    link_to: Option<relations::Index>,
-    link_tag: Option<relations::Index>,
+    link_from: Option<Index>,
+    link_to: Option<Index>,
+    link_tag: Option<Index>,
 }
 impl<'r> EndPoint<'r> for DisplayElement {
     fn url(&self) -> String {
@@ -157,13 +167,40 @@ impl<'r> EndPoint<'r> for DisplayElement {
             _ => Err(FromRequestError::NoMatch),
         }
     }
-    fn generate_response(self, _state: &State) -> Response<Body> {
-        //TODO continue here
-        Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::empty())
-            .unwrap()
+    fn generate_response(self, state: &State) -> Response<Body> {
+        match state.database.borrow().element(self.index) {
+            Ok(element) => Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::from(display_element_page_content(element)))
+                .unwrap(),
+            Err(_) => Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::empty())
+                .unwrap(),
+        }
     }
+}
+fn display_element_page_content(element: Ref<Element>) -> String {
+    let nav = html! {};
+    let class_name = match element.value() {
+        Element::Abstract => "abstract",
+        Element::Atom(_) => "atom",
+        Element::Relation(_) => "relation",
+    };
+    let name = match element.value() {
+        Element::Abstract => format!("Abstract {}", element.index()),
+        Element::Atom(a) => match a {
+            Atom::Text(s) => format!("Atom: \"{}\"", s),
+        },
+        Element::Relation(r) => match r.complement {
+            Some(c) => format!("Relation: {} {} {}", r.subject, r.descriptor, c),
+            None => format!("Relation {} {}", r.subject, r.descriptor),
+        },
+    };
+    let content = html! {
+        h1(class=class_name) : &name;
+    };
+    compose_wiki_page(&name, nav, content)
 }
 
 /// Generated wiki page final assembly. Adds the navigation bar, overall html structure.
@@ -200,6 +237,13 @@ where
     };
     template.into_string().unwrap()
 }
+
+/******************************************************************************
+ * Wiki static files.
+ * Do not depend on page generation.
+ * Static files are stored externally for development (easier to edit).
+ * Their content is statically embedded to remove file dependencies at runtime.
+ */
 
 /// Static files.
 struct StaticAsset<'r> {
@@ -257,6 +301,10 @@ const ASSETS: [AssetDefinition; 3] = [
         content: include_str!("wiki_assets/jquery.js"),
     },
 ];
+
+/******************************************************************************
+ * Wiki runtime utils.
+ */
 
 /// Uri related utilities
 mod uri {
