@@ -10,7 +10,6 @@ use std::rc::Rc;
 
 use horrorshow::{self, Render, RenderOnce, Template};
 
-use self::uri::PathFormat;
 use relations;
 use utils;
 
@@ -181,7 +180,7 @@ impl<'r, T: Into<Cow<'r, str>>> From<T> for StaticAsset<'r> {
 }
 impl<'r> Page<'r> for StaticAsset<'r> {
     fn to_url(&self) -> String {
-        ("static", self.path.borrow()).to_path()
+        format!("/static/{}", self.path)
     }
     fn from_request(request: &'r Request<Body>) -> Result<Self, PageFromRequestError> {
         match (
@@ -251,45 +250,7 @@ mod uri {
             }
         }
     }
-
     impl std::error::Error for ParsingError {}
-    pub trait PathFormat<'p>
-    where
-        Self: Sized + 'p,
-    {
-        type Output: fmt::Display;
-        fn to_path(&self) -> Self::Output;
-        fn from_path(path: &'p str) -> Result<Self, ParsingError>;
-    }
-    impl<'p> PathFormat<'p> for &'p str {
-        type Output = Self;
-        fn to_path(&self) -> Self::Output {
-            *self
-        }
-        fn from_path(path: &'p str) -> Result<Self, ParsingError> {
-            Ok(path)
-        }
-    }
-    impl<'p, T0, T1> PathFormat<'p> for (T0, T1)
-    where
-        T0: PathFormat<'p>,
-        T1: PathFormat<'p>,
-    {
-        type Output = String;
-        fn to_path(&self) -> Self::Output {
-            format!("/{}/{}", self.0.to_path(), self.1.to_path())
-        }
-        fn from_path(path: &'p str) -> Result<Self, ParsingError> {
-            let mut it = path.split('/');
-            let fields = [it.next(), it.next(), it.next(), it.next()];
-            match fields {
-                [Some(""), Some(t0), Some(t1), None] => {
-                    Ok((T0::from_path(t0)?, T1::from_path(t1)?))
-                }
-                _ => Err(ParsingError::Structure),
-            }
-        }
-    }
 
     /// Convertible to something printable in a query string
     pub trait QueryFormat {
@@ -382,13 +343,5 @@ mod uri {
             Some(s) => decode_query_entries(s),
             None => Ok(Map::new()),
         }
-    }
-
-    #[cfg(test)]
-    #[test]
-    fn test() {
-        assert_eq!("/a/b", ("a", "b").to_path());
-        let (a, b) = PathFormat::from_path("/a/b").unwrap();
-        assert_eq!((a, b), ("a", "b"))
     }
 }
