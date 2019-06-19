@@ -62,11 +62,7 @@ pub fn run(addr: &str, database_file: &Path) {
                 end_point_handler::<DisplayElement>,
                 end_point_handler::<StaticAsset>, //
             ];
-            eprintln!("Request: {:?}", request);
-            let response = process_request(&request, &state, handlers.iter());
-            eprintln!("Response: {:?}", response);
-            response
-            //Response::builder().body(Body::empty()).unwrap()
+            process_request(&request, &state, handlers.iter())
         })
     };
     let server = Server::bind(&addr)
@@ -214,8 +210,8 @@ where
         : horrorshow::helper::doctype::HTML;
         html {
             head {
+                meta(charset="UTF-8");
                 link(rel="stylesheet", type="text/css", href=StaticAsset::from("style.css").url());
-                script(src=StaticAsset::from("jquery.js").url()) {}
                 meta(name="viewport", content="width=device-width, initial-scale=1.0");
                 title : title;
             }
@@ -284,7 +280,7 @@ struct AssetDefinition {
     mime: &'static str,
     content: &'static str,
 }
-const ASSETS: [AssetDefinition; 3] = [
+const ASSETS: [AssetDefinition; 2] = [
     AssetDefinition {
         path: "style.css",
         mime: "text/css; charset=utf8",
@@ -294,11 +290,6 @@ const ASSETS: [AssetDefinition; 3] = [
         path: "client.js",
         mime: "application/javascript",
         content: include_str!("wiki_assets/client.js"),
-    },
-    AssetDefinition {
-        path: "jquery.js",
-        mime: "application/javascript",
-        content: include_str!("wiki_assets/jquery.js"),
     },
 ];
 
