@@ -12,7 +12,7 @@ use std::rc::Rc;
 use horrorshow::{self, Render, RenderOnce, Template};
 
 use relations::{Atom, Database, Element, Index, Ref, Relation};
-use utils::remove_prefix;
+use utils::{remove_prefix, Map};
 
 /******************************************************************************
  * Wiki runtime system.
@@ -142,32 +142,64 @@ where
  * Removal TODO
  */
 
+#[derive(Clone, Copy)]
+struct EditState {
+    // Relation
+    subject: Option<Index>,
+    descriptor: Option<Index>,
+    complement: Option<Index>,
+}
+impl EditState {
+    fn empty() -> Self {
+        EditState {
+            subject: None,
+            descriptor: None,
+            complement: None,
+        }
+    }
+    fn from_query<'a>(
+        query: &Map<Cow<'a, str>, Cow<'a, str>>,
+    ) -> Result<Self, std::num::ParseIntError> {
+        Ok(EditState {
+            subject: query.get("subject").map(|s| s.parse()).transpose()?,
+            descriptor: query.get("descriptor").map(|s| s.parse()).transpose()?,
+            complement: query.get("complement").map(|s| s.parse()).transpose()?,
+        })
+    }
+    fn append_to_query(&self, builder: &mut uri::PathQueryBuilder) {
+        builder.optional_entry("subject", self.subject);
+        builder.optional_entry("descriptor", self.descriptor);
+        builder.optional_entry("complement", self.complement);
+    }
+}
+
 /// Display an element of the relation graph.
 struct DisplayElement {
     index: Index,
-    // Temporary selection for link creation
-    link_from: Option<Index>,
-    link_to: Option<Index>,
-    link_tag: Option<Index>,
+    edit_state: EditState,
+}
+impl DisplayElement {
+    fn new(index: Index, edit_state: EditState) -> Self {
+        DisplayElement {
+            index: index,
+            edit_state: edit_state,
+        }
+    }
 }
 impl<'r> EndPoint<'r> for DisplayElement {
     fn url(&self) -> String {
         let mut b = uri::PathQueryBuilder::new(format!("/element/{}", self.index));
-        b.optional_entry("link_from", self.link_from);
-        b.optional_entry("link_to", self.link_to);
-        b.optional_entry("link_tag", self.link_tag);
+        self.edit_state.append_to_query(&mut b);
         b.build()
     }
     fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => {
                 let query = uri::decode_optional_query_entries(r.uri().query())?;
-                Ok(DisplayElement {
-                    index: index.parse()?,
-                    link_from: query.get("link_from").map(|s| s.parse()).transpose()?,
-                    link_to: query.get("link_to").map(|s| s.parse()).transpose()?,
-                    link_tag: query.get("link_tag").map(|s| s.parse()).transpose()?,
-                })
+                Ok(DisplayElement::new(
+                    index.parse()?,
+                    EditState::from_query(&query)?,
+                ))
             }
             _ => Err(FromRequestError::NoMatch),
         }
@@ -176,7 +208,10 @@ impl<'r> EndPoint<'r> for DisplayElement {
         match state.database.borrow().element(self.index) {
             Ok(element) => Response::builder()
                 .status(StatusCode::OK)
-                .body(Body::from(display_element_page_content(element)))
+                .body(Body::from(display_element_page_content(
+                    element,
+                    self.edit_state,
+                )))
                 .unwrap(),
             Err(_) => Response::builder()
                 .status(StatusCode::NOT_FOUND)
@@ -185,7 +220,7 @@ impl<'r> EndPoint<'r> for DisplayElement {
         }
     }
 }
-fn display_element_page_content(element: Ref<Element>) -> String {
+fn display_element_page_content(element: Ref<Element>, edit_state: EditState) -> String {
     let nav = html! {};
     let name = match element.value() {
         Element::Abstract => format!("Abstract {}", element.index()),
@@ -202,27 +237,30 @@ fn display_element_page_content(element: Ref<Element>) -> String {
         h2 : "Subject of";
         ul {
             @ for relation in element.subject_of().iter() {
-                li : relation_link(relation);
+                li : relation_link(relation, edit_state);
             }
         }
         h2 : "Descriptor of";
         ul {
             @ for relation in element.descriptor_of().iter() {
-                li : relation_link(relation);
+                li : relation_link(relation, edit_state);
             }
         }
         h2 : "Complement of";
         ul {
             @ for relation in element.complement_of().iter() {
-                li : relation_link(relation);
+                li : relation_link(relation, edit_state);
             }
         }
     };
     compose_wiki_page(&name, nav, content)
 }
 
-fn relation_link(relation: Ref<Relation>) -> impl Render {
-    relation.index()
+fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: EditState) -> impl Render + 'a {
+    let index = relation.index();
+    owned_html! {
+        a(href=DisplayElement::new(index,edit_state).url(), class="relation") : format!("Element {}", index);
+    }
 }
 fn css_class_name(element: Ref<Element>) -> &'static str {
     match element.value() {
