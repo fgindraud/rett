@@ -1,6 +1,7 @@
-use hyper::rt::Future;
+use hyper::rt::{Future, Stream};
 use hyper::service::service_fn_ok;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use signal_hook::{self, iterator::Signals};
 use tokio::runtime::current_thread;
 
 use std::borrow::Cow;
@@ -49,7 +50,7 @@ impl<E: Into<Box<std::error::Error>>> From<E> for FromRequestError {
 pub fn run(addr: &str, database_file: &Path) {
     let addr = addr.parse().expect("Address::parse");
 
-    let database = ::read_database_from_file(database_file);
+    let database = super::read_database_from_file(database_file);
     let state = Rc::new(State {
         database: RefCell::new(database),
     });
@@ -67,10 +68,18 @@ pub fn run(addr: &str, database_file: &Path) {
     };
     let server = Server::bind(&addr)
         .executor(current_thread::TaskExecutor::current())
-        .serve(create_service)
-        .map_err(|e| panic!("Server error: {}", e));
+        .serve(create_service);
 
-    current_thread::block_on_all(server).expect("Failed");
+    let shutdown_signal = Signals::new(&[signal_hook::SIGTERM, signal_hook::SIGINT])
+        .expect("Signal handler setup")
+        .into_async()
+        .expect("Signal handler to async")
+        .into_future();
+
+    let wiki = server.with_graceful_shutdown(shutdown_signal.map(|_| ()));
+    current_thread::block_on_all(wiki).expect("Runtime error");
+    super::write_database_to_file(database_file, &state.database.borrow());
+    eprintln!("Database saved to {}", database_file.display());
 }
 
 fn end_point_handler<'r, E: EndPoint<'r>>(

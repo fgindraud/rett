@@ -3,6 +3,7 @@
 extern crate horrorshow; // HTML template engine
 extern crate hyper;
 extern crate percent_encoding;
+extern crate signal_hook;
 extern crate tokio;
 
 #[macro_use]

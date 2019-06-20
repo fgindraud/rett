@@ -10,3 +10,4 @@ horrorshow = "0.6"
 hyper = "0.12.30"
 percent-encoding = "1"
 tokio = { version = "^0.1.14", default-features = false, features = ["rt-full"] } # Version from hyper
+signal-hook = { version = "^0.1.9", features = ["tokio-support"] }
