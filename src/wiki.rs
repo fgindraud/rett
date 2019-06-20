@@ -9,9 +9,9 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use horrorshow::{self, RenderOnce, Template};
+use horrorshow::{self, Render, RenderOnce, Template};
 
-use relations::{Atom, Database, Element, Index, Ref};
+use relations::{Atom, Database, Element, Index, Ref, Relation};
 use utils::remove_prefix;
 
 /******************************************************************************
@@ -187,11 +187,6 @@ impl<'r> EndPoint<'r> for DisplayElement {
 }
 fn display_element_page_content(element: Ref<Element>) -> String {
     let nav = html! {};
-    let class_name = match element.value() {
-        Element::Abstract => "abstract",
-        Element::Atom(_) => "atom",
-        Element::Relation(_) => "relation",
-    };
     let name = match element.value() {
         Element::Abstract => format!("Abstract {}", element.index()),
         Element::Atom(a) => match a {
@@ -203,9 +198,38 @@ fn display_element_page_content(element: Ref<Element>) -> String {
         },
     };
     let content = html! {
-        h1(class=class_name) : &name;
+        h1(class=css_class_name(element)) : &name;
+        h2 : "Subject of";
+        ul {
+            @ for relation in element.subject_of().iter() {
+                li : relation_link(relation);
+            }
+        }
+        h2 : "Descriptor of";
+        ul {
+            @ for relation in element.descriptor_of().iter() {
+                li : relation_link(relation);
+            }
+        }
+        h2 : "Complement of";
+        ul {
+            @ for relation in element.complement_of().iter() {
+                li : relation_link(relation);
+            }
+        }
     };
     compose_wiki_page(&name, nav, content)
+}
+
+fn relation_link(relation: Ref<Relation>) -> impl Render {
+    relation.index()
+}
+fn css_class_name(element: Ref<Element>) -> &'static str {
+    match element.value() {
+        Element::Abstract => "abstract",
+        Element::Atom(_) => "atom",
+        Element::Relation(_) => "relation",
+    }
 }
 
 /// Generated wiki page final assembly. Adds the navigation bar, overall html structure.

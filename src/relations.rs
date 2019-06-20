@@ -155,7 +155,6 @@ impl Database {
 /// A Ref<'a, E> is a valid index into the database to an "element of type E".
 /// If E is Atom/Object/Relation, this is a ref to the specific variant.
 /// If E is Element, this is a ref to any type (but still valid index).
-#[derive(Clone, Copy)]
 pub struct Ref<'a, ElementType> {
     database: &'a Database,
     index: Index,
@@ -201,6 +200,13 @@ impl<'a, E> Ref<'a, E> {
         &self.database.elements[self.index]
     }
 }
+impl<'a, E> Clone for Ref<'a, E> {
+    // Manual impl because derive(Clone) requires E: Clone, which is not needed.
+    fn clone(&self) -> Self {
+        Self::new(self.database, self.index)
+    }
+}
+impl<'a, E> Copy for Ref<'a, E> {}
 impl<'a> Ref<'a, Element> {
     pub fn value(&self) -> &Element {
         &self.data().value
@@ -478,6 +484,17 @@ fn split_first(s: &str) -> Option<(char, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn traits() {
+        // Testing clone and copy. Compile test only.
+        let mut db = Database::new();
+        let object_i = db.create_abstract_element();
+        let object_ref = db.element(object_i).unwrap();
+        let copy = object_ref.clone();
+        let copy2 = copy;
+        let copy3 = copy;
+    }
 
     #[test]
     fn basic() {
