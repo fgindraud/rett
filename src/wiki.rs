@@ -60,8 +60,9 @@ pub fn run(addr: &str, database_file: &Path) {
         service_fn_ok(move |request| {
             // Move cloned rc ref in this scope.
             let handlers = [
+                end_point_handler::<ListAllElements>,
                 end_point_handler::<DisplayElement>,
-                end_point_handler::<StaticAsset>, //
+                end_point_handler::<StaticAsset>,
             ];
             process_request(&request, &state, handlers.iter())
         })
@@ -222,32 +223,16 @@ impl<'r> EndPoint<'r> for DisplayElement {
 }
 fn display_element_page_content(element: Ref<Element>, edit_state: EditState) -> String {
     let nav = html! {};
-    let name = match element.value() {
-        Element::Abstract => format!("Abstract {}", element.index()),
-        Element::Atom(a) => match a {
-            Atom::Text(s) => format!("Atom: \"{}\"", s),
-        },
-        Element::Relation(r) => match r.complement {
-            Some(c) => format!("Relation: {} {} {}", r.subject, r.descriptor, c),
-            None => format!("Relation {} {}", r.subject, r.descriptor),
-        },
-    };
+    let name = element_name(element);
     let content = html! {
         h1(class=css_class_name(element)) : &name;
-        h2 : "Subject of";
         ul {
             @ for relation in element.subject_of().iter() {
                 li : relation_link(relation, edit_state);
             }
-        }
-        h2 : "Descriptor of";
-        ul {
             @ for relation in element.descriptor_of().iter() {
                 li : relation_link(relation, edit_state);
             }
-        }
-        h2 : "Complement of";
-        ul {
             @ for relation in element.complement_of().iter() {
                 li : relation_link(relation, edit_state);
             }
@@ -256,10 +241,48 @@ fn display_element_page_content(element: Ref<Element>, edit_state: EditState) ->
     compose_wiki_page(&name, nav, content)
 }
 
+/// List all elements
+struct ListAllElements;
+impl<'r> EndPoint<'r> for ListAllElements {
+    fn url(&self) -> String {
+        String::from("/all")
+    }
+    fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
+        match (r.method(), r.uri().path()) {
+            (&Method::GET, "/all") => Ok(ListAllElements),
+            _ => Err(FromRequestError::NoMatch),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::from(show_all_elements_page_content(
+                &state.database.borrow(),
+            )))
+            .unwrap()
+    }
+}
+fn show_all_elements_page_content(database: &Database) -> String {
+    compose_wiki_page("Éléments", html! {}, html! {})
+}
+
 fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: EditState) -> impl Render + 'a {
     let index = relation.index();
     owned_html! {
         a(href=DisplayElement::new(index,edit_state).url(), class="relation") : format!("Element {}", index);
+    }
+}
+fn element_name(element: Ref<Element>) -> String {
+    //FIXME improve
+    match element.value() {
+        Element::Abstract => format!("Abstract {}", element.index()),
+        Element::Atom(a) => match a {
+            Atom::Text(s) => format!("Atom: \"{}\"", s),
+        },
+        Element::Relation(r) => match r.complement {
+            Some(c) => format!("Relation: {} {} {}", r.subject, r.descriptor, c),
+            None => format!("Relation {} {}", r.subject, r.descriptor),
+        },
     }
 }
 fn css_class_name(element: Ref<Element>) -> &'static str {
@@ -292,7 +315,7 @@ where
                     a(href="/create/atom", class="atom") : "Atom";
                     a(href="/create/abstract", class="abstract") : "Abstract";
                     : additional_nav_links;
-                    a(href="/all") : "All";
+                    a(href=ListAllElements.url()) : "Éléments";
                     // TODO other
                 }
                 main {
