@@ -111,7 +111,7 @@ impl Database {
     }
     pub fn insert_relation(&mut self, relation: Relation) -> Result<Index, Error> {
         let all_indexes_valid = {
-            let is_valid = |i: Index| self.elements.get(i).is_ok();
+            let is_valid = |i: Index| self.elements.get(i).is_some();
             is_valid(relation.subject)
                 && is_valid(relation.descriptor)
                 && relation.complement.map_or(true, is_valid)
@@ -140,7 +140,11 @@ impl Database {
     }
 
     pub fn element(&self, i: Index) -> Result<Ref<Element>, Error> {
-        self.elements.get(i).map(|_| Ref::new(self, i))
+        if self.elements.valid(i) {
+            Ok(Ref::new(self, i))
+        } else {
+            Err(Error::InvalidIndex)
+        }
     }
 
     // Retrieve index of indexable entities.
@@ -149,6 +153,10 @@ impl Database {
     }
     pub fn index_of_relation(&self, relation: &Relation) -> Option<Index> {
         self.index_of_relations.get(relation).cloned()
+    }
+
+    pub fn iter<'a>(&'a self) -> ElementIterator<'a> {
+        ElementIterator::new(self)
     }
 }
 
@@ -263,6 +271,39 @@ impl<'a> RelationRefSet<'a> {
     }
 }
 
+/// Iterator on elements in the database, by increasing ids.
+pub struct ElementIterator<'a> {
+    database: &'a Database,
+    index: Index,
+}
+impl<'a> ElementIterator<'a> {
+    fn new(database: &'a Database) -> Self {
+        ElementIterator {
+            database: database,
+            index: 0,
+        }
+    }
+}
+impl<'a> Iterator for ElementIterator<'a> {
+    type Item = Ref<'a, Element>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let end_index = self.database.elements.capacity();
+        loop {
+            if self.index == end_index {
+                return None;
+            }
+            let current_index = self.index;
+            self.index += 1;
+            if self.database.elements.valid(current_index) {
+                return Some(Ref::new(self.database, current_index));
+            }
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.database.elements.capacity() - self.index))
+    }
+}
+
 /// Vector where elements never change indexes. Removal generate holes.
 struct SlotVec<T> {
     inner: Vec<Option<T>>,
@@ -271,16 +312,19 @@ impl<T> SlotVec<T> {
     fn new() -> Self {
         SlotVec { inner: Vec::new() }
     }
-    fn get(&self, i: usize) -> Result<&T, Error> {
+    fn valid(&self, i: usize) -> bool {
+        i < self.inner.len() && self.inner[i].is_some()
+    }
+    fn get(&self, i: usize) -> Option<&T> {
         match self.inner.get(i) {
-            Some(&Some(ref e)) => Ok(e),
-            _ => Err(Error::InvalidIndex),
+            Some(&Some(ref e)) => Some(e),
+            _ => None,
         }
     }
-    fn get_mut(&mut self, i: usize) -> Result<&mut T, Error> {
+    fn get_mut(&mut self, i: usize) -> Option<&mut T> {
         match self.inner.get_mut(i) {
-            Some(&mut Some(ref mut e)) => Ok(e),
-            _ => Err(Error::InvalidIndex),
+            Some(&mut Some(ref mut e)) => Some(e),
+            _ => None,
         }
     }
     fn insert(&mut self, e: T) -> usize {
@@ -296,6 +340,9 @@ impl<T> SlotVec<T> {
         let index = self.inner.len();
         self.inner.push(Some(e));
         index
+    }
+    fn capacity(&self) -> usize {
+        self.inner.len()
     }
 }
 impl<T> std::ops::Index<usize> for SlotVec<T> {
@@ -398,12 +445,12 @@ impl Database {
         let nb_slots = db.elements.inner.len();
         for index in 0..nb_slots {
             let elements = &db.elements;
-            let validate_index = |i: Index| match elements.get(i) {
-                Ok(_) => Ok(()),
-                Err(_) => Err("invalid index"),
+            let is_index_valid = |i: Index| match elements.get(i) {
+                Some(_) => Ok(()),
+                None => Err("invalid index"),
             };
             if let Some(ref data) = elements.inner[index] {
-                let check_and_register = match data.value {
+                let check_and_register: Result<(), &str> = match data.value {
                     Element::Atom(ref a) => match db.index_of_atoms.insert(a.clone(), index) {
                         Some(_previous) => Err("atom duplicated"),
                         None => Ok(()),
@@ -413,9 +460,9 @@ impl Database {
                             Some(_previous) => Err("relation duplicated"),
                             None => Ok(()),
                         }
-                        .and_then(|()| validate_index(r.subject))
-                        .and_then(|()| validate_index(r.descriptor))
-                        .and_then(|()| r.complement.map_or(Ok(()), validate_index))
+                        .and(is_index_valid(r.subject))
+                        .and(is_index_valid(r.descriptor))
+                        .and(r.complement.map_or(Ok(()), is_index_valid))
                     }
                     Element::Abstract => Ok(()),
                 };
@@ -512,6 +559,13 @@ mod tests {
         };
         let relation_i = db.insert_relation(relation.clone()).unwrap();
 
+        // Test iterator (relies on incremental index allocation)
+        let valid_indexes: Vec<_> = db.iter().map(|r| r.index()).collect();
+        assert_eq!(
+            valid_indexes,
+            vec![name_i, object_i, is_named_i, relation_i]
+        );
+
         // Test raw API.
         assert_eq!(Some(name_i), db.index_of_atom(&name));
         assert_eq!(name_i, db.insert_atom(name));
@@ -578,8 +632,8 @@ mod tests {
         assert_eq!(db.elements.inner.len(), db_clone.elements.inner.len());
         for i in 0..db.elements.inner.len() {
             let both_slots_match = match (db.elements.get(i), db_clone.elements.get(i)) {
-                (Err(_), Err(_)) => true,
-                (Ok(dbo), Ok(dbc)) => {
+                (None, None) => true,
+                (Some(dbo), Some(dbc)) => {
                     let element_match = match (&dbo.value, &dbc.value) {
                         (Element::Abstract, Element::Abstract) => true,
                         (Element::Atom(ref l), Element::Atom(ref r)) => l == r,
