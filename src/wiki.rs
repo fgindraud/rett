@@ -143,7 +143,7 @@ where
  * Removal TODO
  */
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone)]
 struct EditState {
     // Relation
     subject: Option<Index>,
@@ -180,10 +180,10 @@ struct DisplayElement {
     edit_state: EditState,
 }
 impl DisplayElement {
-    fn new(index: Index, edit_state: EditState) -> Self {
+    fn new(index: Index, edit_state: &EditState) -> Self {
         DisplayElement {
             index: index,
-            edit_state: edit_state,
+            edit_state: edit_state.clone(),
         }
     }
 }
@@ -197,10 +197,10 @@ impl<'r> EndPoint<'r> for DisplayElement {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => {
                 let query = uri::decode_optional_query_entries(r.uri().query())?;
-                Ok(DisplayElement::new(
-                    index.parse()?,
-                    EditState::from_query(&query)?,
-                ))
+                Ok(DisplayElement {
+                    index: index.parse()?,
+                    edit_state: EditState::from_query(&query)?,
+                })
             }
             _ => Err(FromRequestError::NoMatch),
         }
@@ -211,7 +211,7 @@ impl<'r> EndPoint<'r> for DisplayElement {
                 .status(StatusCode::OK)
                 .body(Body::from(display_element_page_content(
                     element,
-                    self.edit_state,
+                    &self.edit_state,
                 )))
                 .unwrap(),
             Err(_) => Response::builder()
@@ -221,7 +221,7 @@ impl<'r> EndPoint<'r> for DisplayElement {
         }
     }
 }
-fn display_element_page_content(element: Ref<Element>, edit_state: EditState) -> String {
+fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -> String {
     let nav = html! {};
     let name = element_name(element);
     let content = html! {
@@ -238,11 +238,10 @@ fn display_element_page_content(element: Ref<Element>, edit_state: EditState) ->
             }
         }
     };
-    compose_wiki_page(&name, nav, content)
+    compose_wiki_page(&name, content, edit_state)
 }
 
 /// List all elements
-#[derive(Default)]
 struct ListAllElements {
     edit_state: EditState,
 }
@@ -268,37 +267,29 @@ impl<'r> EndPoint<'r> for ListAllElements {
             .status(StatusCode::OK)
             .body(Body::from(show_all_elements_page_content(
                 &state.database.borrow(),
-                self.edit_state,
+                &self.edit_state,
             )))
             .unwrap()
     }
 }
-fn show_all_elements_page_content(database: &Database, edit_state: EditState) -> String {
+fn show_all_elements_page_content(database: &Database, edit_state: &EditState) -> String {
     let content = html! {
-        ul {
-            @ for element in database.iter() {
-                li {
+        @ for element in database.iter() {
+            p {
+                a(href=DisplayElement::new(element.index(), edit_state).url(), class=css_class_name(element)) {
                     : element.index();
                     : " ";
-                    : element_link(element, edit_state);
+                    : element_name(element);
                 }
             }
         }
     };
-    compose_wiki_page("elements", html! {}, content)
+    compose_wiki_page("elements", content, edit_state)
 }
 
-fn element_link<'a>(element: Ref<'a, Element>, edit_state: EditState) -> impl Render + 'a {
-    let index = element.index();
-    let class = css_class_name(element);
+fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: &'a EditState) -> impl Render + 'a {
     owned_html! {
-        a(href=DisplayElement::new(index, edit_state).url(), class=class) : element_name(element);
-    }
-}
-fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: EditState) -> impl Render + 'a {
-    let index = relation.index();
-    owned_html! {
-        a(href=DisplayElement::new(index,edit_state).url(), class="relation") : format!("Element {}", index);
+        a(href=DisplayElement::new(relation.index(),edit_state).url(), class="relation") : format!("Element {}", relation.index());
     }
 }
 fn element_name(element: Ref<Element>) -> String {
@@ -340,10 +331,9 @@ fn css_class_name(element: Ref<Element>) -> &'static str {
 }
 
 /// Generated wiki page final assembly. Adds the navigation bar, overall html structure.
-fn compose_wiki_page<T, N, C>(title: T, additional_nav_links: N, content: C) -> String
+fn compose_wiki_page<T, C>(title: T, content: C, edit_state: &EditState) -> String
 where
     T: RenderOnce,
-    N: RenderOnce,
     C: RenderOnce,
 {
     let template = html! {
@@ -358,10 +348,9 @@ where
             body {
                 nav {
                     a(href="/") : "Home";
+                    a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : "Elements";
                     a(href="/create/atom", class="atom") : "Atom";
                     a(href="/create/abstract", class="abstract") : "Abstract";
-                    : additional_nav_links;
-                    a(href=ListAllElements::default().url()) : "Elements"; //TODO pass edit_state there too...
                     // TODO other
                 }
                 main {
