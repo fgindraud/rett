@@ -143,7 +143,7 @@ where
  * Removal TODO
  */
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct EditState {
     // Relation
     subject: Option<Index>,
@@ -242,14 +242,24 @@ fn display_element_page_content(element: Ref<Element>, edit_state: EditState) ->
 }
 
 /// List all elements
-struct ListAllElements;
+#[derive(Default)]
+struct ListAllElements {
+    edit_state: EditState,
+}
 impl<'r> EndPoint<'r> for ListAllElements {
     fn url(&self) -> String {
-        String::from("/all")
+        let mut b = uri::PathQueryBuilder::new("/all".into());
+        self.edit_state.append_to_query(&mut b);
+        b.build()
     }
     fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
         match (r.method(), r.uri().path()) {
-            (&Method::GET, "/all") => Ok(ListAllElements),
+            (&Method::GET, "/all") => {
+                let query = uri::decode_optional_query_entries(r.uri().query())?;
+                Ok(ListAllElements {
+                    edit_state: EditState::from_query(&query)?,
+                })
+            }
             _ => Err(FromRequestError::NoMatch),
         }
     }
@@ -258,14 +268,33 @@ impl<'r> EndPoint<'r> for ListAllElements {
             .status(StatusCode::OK)
             .body(Body::from(show_all_elements_page_content(
                 &state.database.borrow(),
+                self.edit_state,
             )))
             .unwrap()
     }
 }
-fn show_all_elements_page_content(database: &Database) -> String {
-    compose_wiki_page("Éléments", html! {}, html! {})
+fn show_all_elements_page_content(database: &Database, edit_state: EditState) -> String {
+    let content = html! {
+        ul {
+            @ for element in database.iter() {
+                li {
+                    : element.index();
+                    : " ";
+                    : element_link(element, edit_state);
+                }
+            }
+        }
+    };
+    compose_wiki_page("elements", html! {}, content)
 }
 
+fn element_link<'a>(element: Ref<'a, Element>, edit_state: EditState) -> impl Render + 'a {
+    let index = element.index();
+    let class = css_class_name(element);
+    owned_html! {
+        a(href=DisplayElement::new(index, edit_state).url(), class=class) : element_name(element);
+    }
+}
 fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: EditState) -> impl Render + 'a {
     let index = relation.index();
     owned_html! {
@@ -278,11 +307,22 @@ fn element_name(element: Ref<Element>) -> String {
             Atom::Text(s) => s.clone(),
         },
         ElementRef::Abstract(r) => {
-            let is_named_atom_index = element.database(); // TODO if rel(r,is_named,c as text) use c.
-            format!("Abstract {}", element.index())
+            if let Some(is_named_atom_index) = element.database().index_of_text_atom("is named") {
+                let name = r.subject_of().iter().find_map(|r| {
+                    if r.descriptor().index() == is_named_atom_index {
+                        r.complement()
+                    } else {
+                        None
+                    }
+                });
+                if let Some(name) = name {
+                    return element_name(name);
+                }
+            }
+            format!("Abstrait_{}", element.index())
         }
         ElementRef::Relation(r) => {
-            let display_relation_element = 32; // TODO naming of (s,d,c) without relation recursion
+            // TODO naming of (s,d,c) without relation recursion
             let r = r.value();
             match r.complement {
                 Some(c) => format!("Relation: {} {} {}", r.subject, r.descriptor, c),
@@ -321,7 +361,7 @@ where
                     a(href="/create/atom", class="atom") : "Atom";
                     a(href="/create/abstract", class="abstract") : "Abstract";
                     : additional_nav_links;
-                    a(href=ListAllElements.url()) : "Éléments";
+                    a(href=ListAllElements::default().url()) : "Elements"; //TODO pass edit_state there too...
                     // TODO other
                 }
                 main {

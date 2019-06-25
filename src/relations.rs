@@ -180,7 +180,7 @@ impl Database {
     pub fn index_of_text_atom<Q>(&self, text: &Q) -> Option<Index>
     where
         String: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         self.index_of_text_atoms.get(text).cloned()
     }
