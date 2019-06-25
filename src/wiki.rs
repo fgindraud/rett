@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use horrorshow::{self, Render, RenderOnce, Template};
 
-use relations::{Atom, Database, Element, Index, Ref, Relation};
+use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
 use utils::{remove_prefix, Map};
 
 /******************************************************************************
@@ -273,16 +273,22 @@ fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: EditState) -> impl
     }
 }
 fn element_name(element: Ref<Element>) -> String {
-    //FIXME improve
-    match element.value() {
-        Element::Abstract => format!("Abstract {}", element.index()),
-        Element::Atom(a) => match a {
-            Atom::Text(s) => format!("Atom: \"{}\"", s),
+    match element.cases() {
+        ElementRef::Atom(r) => match r.value() {
+            Atom::Text(s) => s.clone(),
         },
-        Element::Relation(r) => match r.complement {
-            Some(c) => format!("Relation: {} {} {}", r.subject, r.descriptor, c),
-            None => format!("Relation {} {}", r.subject, r.descriptor),
-        },
+        ElementRef::Abstract(r) => {
+            let is_named_atom_index = element.database(); // TODO if rel(r,is_named,c as text) use c.
+            format!("Abstract {}", element.index())
+        }
+        ElementRef::Relation(r) => {
+            let display_relation_element = 32; // TODO naming of (s,d,c) without relation recursion
+            let r = r.value();
+            match r.complement {
+                Some(c) => format!("Relation: {} {} {}", r.subject, r.descriptor, c),
+                None => format!("Relation {} {}", r.subject, r.descriptor),
+            }
+        }
     }
 }
 fn css_class_name(element: Ref<Element>) -> &'static str {

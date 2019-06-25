@@ -1,5 +1,7 @@
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt;
+use std::hash::Hash;
 use std::io;
 use std::marker::PhantomData;
 use utils::Set;
@@ -8,11 +10,13 @@ use utils::Set;
 #[derive(Debug, Eq, PartialEq)]
 pub enum Error {
     InvalidIndex,
+    DuplicatedElement,
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Error::InvalidIndex => "invalid index".fmt(f),
+            Error::DuplicatedElement => "duplicated element".fmt(f),
         }
     }
 }
@@ -29,7 +33,7 @@ type RelationIndex = usize;
 pub struct Abstract;
 
 /// Atom of data that is known, self contained, indexable.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Atom {
     Text(String),
     // TODO integers ?
@@ -56,6 +60,7 @@ impl From<&str> for Atom {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Element {
     Abstract,
     Atom(Atom),
@@ -80,7 +85,7 @@ impl ElementData {
 
 pub struct Database {
     elements: SlotVec<ElementData>,
-    index_of_atoms: HashMap<Atom, AtomIndex>,
+    index_of_text_atoms: HashMap<String, AtomIndex>,
     index_of_relations: HashMap<Relation, RelationIndex>,
 }
 
@@ -88,57 +93,76 @@ impl Database {
     pub fn new() -> Database {
         Database {
             elements: SlotVec::new(),
-            index_of_atoms: HashMap::new(),
+            index_of_text_atoms: HashMap::new(),
             index_of_relations: HashMap::new(),
         }
     }
 
-    // Add new entities to the database.
+    /// Add a new abstract element.
     pub fn create_abstract_element(&mut self) -> Index {
         self.elements.insert(ElementData::new(Element::Abstract))
     }
+
+    /// Add an atom, or return index if already present.
     pub fn insert_atom(&mut self, atom: Atom) -> Index {
         match self.index_of_atom(&atom) {
             Some(index) => index,
             None => {
-                let index = self
-                    .elements
-                    .insert(ElementData::new(Element::Atom(atom.clone())));
-                self.index_of_atoms.insert(atom, index);
+                let data = ElementData::new(Element::Atom(atom.clone()));
+                let index = self.elements.insert(data);
+                self.register_atom(index, atom).unwrap();
                 index
             }
         }
     }
-    pub fn insert_relation(&mut self, relation: Relation) -> Result<Index, Error> {
-        let all_indexes_valid = {
-            let is_valid = |i: Index| self.elements.get(i).is_some();
-            is_valid(relation.subject)
-                && is_valid(relation.descriptor)
-                && relation.complement.map_or(true, is_valid)
+    // Add a newly inserted Atom (at index) to tables. No-op on error.
+    fn register_atom(&mut self, index: Index, atom: Atom) -> Result<(), Error> {
+        let insert = match atom {
+            Atom::Text(s) => self.index_of_text_atoms.insert(s, index),
         };
-        if !all_indexes_valid {
-            return Err(Error::InvalidIndex);
+        match insert {
+            Some(_) => Err(Error::DuplicatedElement),
+            None => Ok(()),
         }
-        Ok(match self.index_of_relation(&relation) {
-            Some(index) => index,
-            None => {
-                let index = self
-                    .elements
-                    .insert(ElementData::new(Element::Relation(relation.clone())));
-                self.elements[relation.subject].subject_of.insert(index);
-                self.elements[relation.descriptor]
-                    .descriptor_of
-                    .insert(index);
-                if let Some(i) = relation.complement {
-                    self.elements[i].complement_of.insert(index)
-                }
-                self.elements[relation.subject].subject_of.insert(index);
-                self.index_of_relations.insert(relation, index);
-                index
-            }
-        })
     }
 
+    /// Add a relation, or return index if already present.
+    pub fn insert_relation(&mut self, relation: Relation) -> Result<Index, Error> {
+        match self.index_of_relation(&relation) {
+            Some(index) => Ok(index),
+            None => {
+                let data = ElementData::new(Element::Relation(relation.clone()));
+                let index = self.elements.insert(data);
+                match self.register_relation(index, relation) {
+                    Ok(()) => Ok(index),
+                    Err(e) => {
+                        self.elements.remove(index); // Revert insertion.
+                        Err(e)
+                    }
+                }
+            }
+        }
+    }
+    // Add a newly inserted Relation (at index) to tables. No-op on error.
+    fn register_relation(&mut self, index: Index, rel: Relation) -> Result<(), Error> {
+        let indexes_valid = self.elements.valid(rel.subject)
+            && self.elements.valid(rel.descriptor)
+            && rel.complement.map_or(true, |c| self.elements.valid(c));
+        if !indexes_valid {
+            return Err(Error::InvalidIndex);
+        }
+        if self.index_of_relations.insert(rel.clone(), index).is_some() {
+            return Err(Error::DuplicatedElement);
+        }
+        self.elements[rel.subject].subject_of.insert(index);
+        self.elements[rel.descriptor].descriptor_of.insert(index);
+        if let Some(complement) = rel.complement {
+            self.elements[complement].complement_of.insert(index);
+        }
+        Ok(())
+    }
+
+    /// Access element by index.
     pub fn element(&self, i: Index) -> Result<Ref<Element>, Error> {
         if self.elements.valid(i) {
             Ok(Ref::new(self, i))
@@ -149,12 +173,23 @@ impl Database {
 
     // Retrieve index of indexable entities.
     pub fn index_of_atom(&self, atom: &Atom) -> Option<Index> {
-        self.index_of_atoms.get(atom).cloned()
+        match atom {
+            Atom::Text(s) => self.index_of_text_atom(s),
+        }
     }
+    pub fn index_of_text_atom<Q>(&self, text: &Q) -> Option<Index>
+    where
+        String: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.index_of_text_atoms.get(text).cloned()
+    }
+
     pub fn index_of_relation(&self, relation: &Relation) -> Option<Index> {
         self.index_of_relations.get(relation).cloned()
     }
 
+    /// Iterate on all elements.
     pub fn iter<'a>(&'a self) -> ElementIterator<'a> {
         ElementIterator::new(self)
     }
@@ -341,6 +376,12 @@ impl<T> SlotVec<T> {
         self.inner.push(Some(e));
         index
     }
+    fn remove(&mut self, i: usize) -> Option<T> {
+        match self.inner.get_mut(i) {
+            Some(slot) => slot.take(),
+            None => None,
+        }
+    }
     fn capacity(&self) -> usize {
         self.inner.len()
     }
@@ -441,68 +482,21 @@ impl Database {
             };
             db.elements.inner.push(slot)
         }
-        // Check referenced indexes, update index maps
+        // Check and register elements
         let nb_slots = db.elements.inner.len();
         for index in 0..nb_slots {
-            let elements = &db.elements;
-            let is_index_valid = |i: Index| match elements.get(i) {
-                Some(_) => Ok(()),
-                None => Err("invalid index"),
-            };
-            if let Some(ref data) = elements.inner[index] {
-                let check_and_register: Result<(), &str> = match data.value {
-                    Element::Atom(ref a) => match db.index_of_atoms.insert(a.clone(), index) {
-                        Some(_previous) => Err("atom duplicated"),
-                        None => Ok(()),
-                    },
-                    Element::Relation(ref r) => {
-                        match db.index_of_relations.insert(r.clone(), index) {
-                            Some(_previous) => Err("relation duplicated"),
-                            None => Ok(()),
-                        }
-                        .and(is_index_valid(r.subject))
-                        .and(is_index_valid(r.descriptor))
-                        .and(r.complement.map_or(Ok(()), is_index_valid))
-                    }
+            if let Some(element) = db.elements.inner[index].as_ref().map(|ed| ed.value.clone()) {
+                match element {
                     Element::Abstract => Ok(()),
-                };
-                check_and_register.map_err(|s| {
+                    Element::Atom(atom) => db.register_atom(index, atom),
+                    Element::Relation(relation) => db.register_relation(index, relation),
+                }
+                .map_err(|s| {
                     io::Error::new(
                         io::ErrorKind::Other,
                         format!("Bad Element at index {}: {}", index, s),
                     )
                 })?;
-            }
-        }
-        // Update *_of sets. Must be done carefully, as we scan and mutate db.elements.
-        for index in 0..nb_slots {
-            // Clone indexes if this is a relation, to avoid keeping a ref to db.elements.
-            let maybe_relation = match db.elements.inner[index] {
-                Some(ElementData {
-                    value: Element::Relation(ref r),
-                    ..
-                }) => Some(r.clone()),
-                _ => None,
-            };
-            // Add to sets, indexes are already validated at the previous steps.
-            if let Some(relation) = maybe_relation {
-                db.elements
-                    .get_mut(relation.subject)
-                    .unwrap()
-                    .subject_of
-                    .insert(index);
-                db.elements
-                    .get_mut(relation.descriptor)
-                    .unwrap()
-                    .descriptor_of
-                    .insert(index);
-                if let Some(complement) = relation.complement {
-                    db.elements
-                        .get_mut(complement)
-                        .unwrap()
-                        .complement_of
-                        .insert(index);
-                }
             }
         }
         Ok(db)
@@ -649,7 +643,7 @@ mod tests {
             };
             assert!(both_slots_match);
         }
-        assert_eq!(db.index_of_atoms, db_clone.index_of_atoms);
+        assert_eq!(db.index_of_text_atoms, db_clone.index_of_text_atoms);
         assert_eq!(db.index_of_relations, db_clone.index_of_relations);
     }
 }
