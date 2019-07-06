@@ -1,4 +1,0 @@
--std=c++11
--I./
--Iduck/
--I/usr/include/qt/QtCore/
