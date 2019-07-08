@@ -37,10 +37,10 @@ where
 /// Error code used for routing. BadRequest is used to stop matching with an error.
 enum FromRequestError {
     NoMatch,
-    BadRequest(Box<std::error::Error>),
+    BadRequest(Box<dyn std::error::Error>),
 }
 /// Convenience conversion which allows to use '?' in from_request() implementations.
-impl<E: Into<Box<std::error::Error>>> From<E> for FromRequestError {
+impl<E: Into<Box<dyn std::error::Error>>> From<E> for FromRequestError {
     fn from(e: E) -> Self {
         FromRequestError::BadRequest(e.into())
     }
@@ -125,20 +125,15 @@ where
 
 /* Design:
  *
- * In //:
- * - if stop signal, gracefully shutdown + save db
- * - if request, build page
+ * Link creation:
+ * buttons to start creating a link from/to a normal display page.
+ * cancel + build button if all requirements are filled
  *
- * -> need some router-like small tool, see RegexSet
+ * Atom creation:
+ * GET /create/atom: form with text and button
+ * POST /create/atom: edit and redirect to atom
  *
- * Pages:
- * - display for any index
- * - atom creation
- * - abstract creation
- * - link creation:
- *   - buttons to start creating a link from/to a normal display page.
- *   - add get-type params to represent partial state (?link_to=x&...)
- *   - cancel + build button if all requirements are filled
+ * Abstract creation: Same with optional name field.
  *
  * Removal TODO
  */
