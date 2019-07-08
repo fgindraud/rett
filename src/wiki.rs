@@ -284,9 +284,10 @@ fn show_all_elements_page_content(database: &Database, edit_state: &EditState) -
             }
         }
     };
-    compose_wiki_page("elements", content, edit_state)
+    compose_wiki_page(lang::ALL_ELEMENTS, content, edit_state)
 }
 
+//FIXME text use lang
 fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: &'a EditState) -> impl Render + 'a {
     owned_html! {
         a(href=DisplayElement::new(relation.index(),edit_state).url(), class="relation") : format!("Element {}", relation.index());
@@ -298,7 +299,9 @@ fn element_name(element: Ref<Element>) -> String {
             Atom::Text(s) => s.clone(),
         },
         ElementRef::Abstract(r) => {
-            if let Some(is_named_atom_index) = element.database().index_of_text_atom("is named") {
+            if let Some(is_named_atom_index) =
+                element.database().index_of_text_atom(lang::NAMED_ATOM)
+            {
                 let name = r.subject_of().iter().find_map(|r| {
                     if r.descriptor().index() == is_named_atom_index {
                         r.complement()
@@ -348,9 +351,9 @@ where
             body {
                 nav {
                     a(href="/") : "Home";
-                    a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : "Elements";
-                    a(href="/create/atom", class="atom") : "Atom";
-                    a(href="/create/abstract", class="abstract") : "Abstract";
+                    a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : lang::ALL_ELEMENTS;
+                    a(href="/create/atom", class="atom") : lang::CREATE_ATOM;
+                    a(href="/create/abstract", class="abstract") : lang::CREATE_ABSTRACT;
                     // TODO other
                 }
                 main {
@@ -421,6 +424,16 @@ const ASSETS: [AssetDefinition; 2] = [
         content: include_str!("wiki_assets/client.js"),
     },
 ];
+
+/******************************************************************************
+ * Language.
+ */
+mod lang {
+    pub const ALL_ELEMENTS: &'static str = "Éléments";
+    pub const CREATE_ATOM: &'static str = "Atome...";
+    pub const CREATE_ABSTRACT: &'static str = "Abstrait...";
+    pub const NAMED_ATOM: &'static str = "est nommé";
+}
 
 /******************************************************************************
  * Wiki runtime utils.
