@@ -62,6 +62,7 @@ pub fn run(addr: &str, database_file: &Path) {
             let handlers = [
                 end_point_handler::<ListAllElements>,
                 end_point_handler::<DisplayElement>,
+                end_point_handler::<CreateAtom>,
                 end_point_handler::<StaticAsset>,
             ];
             process_request(&request, &state, handlers.iter())
@@ -128,10 +129,6 @@ where
  * Link creation:
  * buttons to start creating a link from/to a normal display page.
  * cancel + build button if all requirements are filled
- *
- * Atom creation:
- * GET /create/atom: form with text and button
- * POST /create/atom: edit and redirect to atom
  *
  * Abstract creation: Same with optional name field.
  *
@@ -282,6 +279,51 @@ fn show_all_elements_page_content(database: &Database, edit_state: &EditState) -
     compose_wiki_page(lang::ALL_ELEMENTS, content, edit_state)
 }
 
+/// Create an atom.
+enum CreateAtom {
+    Get { edit_state: EditState },
+    Post,
+}
+impl<'r> EndPoint<'r> for CreateAtom {
+    fn url(&self) -> String {
+        String::from("/create/atom")
+    }
+    fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
+        match (r.method(), r.uri().path()) {
+            (&Method::GET, "/create/atom") => {
+                let query = uri::decode_optional_query_entries(r.uri().query())?;
+                Ok(CreateAtom::Get {
+                    edit_state: EditState::from_query(&query)?,
+                })
+            }
+            (&Method::POST, "/create/atom") => {
+                eprintln!("CreateAtomPost: {:?}", r); //FIXME body is a future::Stream... cannot match it there
+                Ok(CreateAtom::Post)
+            }
+            _ => Err(FromRequestError::NoMatch),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        match self {
+            CreateAtom::Get { edit_state } => {
+                let content = html! {
+                    form(method="post") {
+                        : "Value:";
+                        input(type="text", name="text");
+                        input(type="submit", value="Create");
+                    }
+                };
+                let page = compose_wiki_page(lang::CREATE_ATOM, content, &edit_state);
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(page))
+                    .unwrap()
+            }
+            CreateAtom::Post => unimplemented!(),
+        }
+    }
+}
+
 //FIXME text use lang
 fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: &'a EditState) -> impl Render + 'a {
     owned_html! {
@@ -347,7 +389,7 @@ where
                 nav {
                     a(href="/") : "Home";
                     a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : lang::ALL_ELEMENTS;
-                    a(href="/create/atom", class="atom") : lang::CREATE_ATOM;
+                    a(href=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="atom") : lang::CREATE_ATOM;
                     a(href="/create/abstract", class="abstract") : lang::CREATE_ABSTRACT;
                     // TODO other
                 }
