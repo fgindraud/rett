@@ -365,7 +365,7 @@ impl<T> SlotVec<T> {
     fn insert(&mut self, e: T) -> usize {
         // Find unused index
         for index in 0..self.inner.len() {
-            let mut cell = &mut self.inner[index];
+            let cell = &mut self.inner[index];
             if cell.is_none() {
                 *cell = Some(e);
                 return index;

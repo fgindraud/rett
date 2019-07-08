@@ -37,10 +37,10 @@ where
 /// Error code used for routing. BadRequest is used to stop matching with an error.
 enum FromRequestError {
     NoMatch,
-    BadRequest(Box<std::error::Error>),
+    BadRequest(Box<dyn std::error::Error>),
 }
 /// Convenience conversion which allows to use '?' in from_request() implementations.
-impl<E: Into<Box<std::error::Error>>> From<E> for FromRequestError {
+impl<E: Into<Box<dyn std::error::Error>>> From<E> for FromRequestError {
     fn from(e: E) -> Self {
         FromRequestError::BadRequest(e.into())
     }
@@ -62,6 +62,7 @@ pub fn run(addr: &str, database_file: &Path) {
             let handlers = [
                 end_point_handler::<ListAllElements>,
                 end_point_handler::<DisplayElement>,
+                end_point_handler::<CreateAtom>,
                 end_point_handler::<StaticAsset>,
             ];
             process_request(&request, &state, handlers.iter())
@@ -125,20 +126,11 @@ where
 
 /* Design:
  *
- * In //:
- * - if stop signal, gracefully shutdown + save db
- * - if request, build page
+ * Link creation:
+ * buttons to start creating a link from/to a normal display page.
+ * cancel + build button if all requirements are filled
  *
- * -> need some router-like small tool, see RegexSet
- *
- * Pages:
- * - display for any index
- * - atom creation
- * - abstract creation
- * - link creation:
- *   - buttons to start creating a link from/to a normal display page.
- *   - add get-type params to represent partial state (?link_to=x&...)
- *   - cancel + build button if all requirements are filled
+ * Abstract creation: Same with optional name field.
  *
  * Removal TODO
  */
@@ -284,9 +276,55 @@ fn show_all_elements_page_content(database: &Database, edit_state: &EditState) -
             }
         }
     };
-    compose_wiki_page("elements", content, edit_state)
+    compose_wiki_page(lang::ALL_ELEMENTS, content, edit_state)
 }
 
+/// Create an atom.
+enum CreateAtom {
+    Get { edit_state: EditState },
+    Post,
+}
+impl<'r> EndPoint<'r> for CreateAtom {
+    fn url(&self) -> String {
+        String::from("/create/atom")
+    }
+    fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
+        match (r.method(), r.uri().path()) {
+            (&Method::GET, "/create/atom") => {
+                let query = uri::decode_optional_query_entries(r.uri().query())?;
+                Ok(CreateAtom::Get {
+                    edit_state: EditState::from_query(&query)?,
+                })
+            }
+            (&Method::POST, "/create/atom") => {
+                eprintln!("CreateAtomPost: {:?}", r); //FIXME body is a future::Stream... cannot match it there
+                Ok(CreateAtom::Post)
+            }
+            _ => Err(FromRequestError::NoMatch),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        match self {
+            CreateAtom::Get { edit_state } => {
+                let content = html! {
+                    form(method="post") {
+                        : "Value:";
+                        input(type="text", name="text");
+                        input(type="submit", value="Create");
+                    }
+                };
+                let page = compose_wiki_page(lang::CREATE_ATOM, content, &edit_state);
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(page))
+                    .unwrap()
+            }
+            CreateAtom::Post => unimplemented!(),
+        }
+    }
+}
+
+//FIXME text use lang
 fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: &'a EditState) -> impl Render + 'a {
     owned_html! {
         a(href=DisplayElement::new(relation.index(),edit_state).url(), class="relation") : format!("Element {}", relation.index());
@@ -298,7 +336,9 @@ fn element_name(element: Ref<Element>) -> String {
             Atom::Text(s) => s.clone(),
         },
         ElementRef::Abstract(r) => {
-            if let Some(is_named_atom_index) = element.database().index_of_text_atom("is named") {
+            if let Some(is_named_atom_index) =
+                element.database().index_of_text_atom(lang::NAMED_ATOM)
+            {
                 let name = r.subject_of().iter().find_map(|r| {
                     if r.descriptor().index() == is_named_atom_index {
                         r.complement()
@@ -348,9 +388,9 @@ where
             body {
                 nav {
                     a(href="/") : "Home";
-                    a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : "Elements";
-                    a(href="/create/atom", class="atom") : "Atom";
-                    a(href="/create/abstract", class="abstract") : "Abstract";
+                    a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : lang::ALL_ELEMENTS;
+                    a(href=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="atom") : lang::CREATE_ATOM;
+                    a(href="/create/abstract", class="abstract") : lang::CREATE_ABSTRACT;
                     // TODO other
                 }
                 main {
@@ -421,6 +461,16 @@ const ASSETS: [AssetDefinition; 2] = [
         content: include_str!("wiki_assets/client.js"),
     },
 ];
+
+/******************************************************************************
+ * Language.
+ */
+mod lang {
+    pub const ALL_ELEMENTS: &'static str = "Éléments";
+    pub const CREATE_ATOM: &'static str = "Atome...";
+    pub const CREATE_ABSTRACT: &'static str = "Abstrait...";
+    pub const NAMED_ATOM: &'static str = "est nommé";
+}
 
 /******************************************************************************
  * Wiki runtime utils.
