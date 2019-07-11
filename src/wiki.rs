@@ -25,18 +25,18 @@ struct State {
 }
 
 /// Interface for an URL endpoint.
-trait EndPoint<'r>
+trait EndPoint
 where
-    Self: Sized + 'r,
+    Self: Sized,
 {
     fn url(&self) -> String;
-    fn from_request(request: &'r Request<Body>) -> Result<Self, FromRequestError>;
+    fn from_request(request: Request<Body>) -> Result<Self, FromRequestError>;
     fn generate_response(self, state: &State) -> Response<Body>;
 }
 
 /// Error code used for routing. BadRequest is used to stop matching with an error.
 enum FromRequestError {
-    NoMatch,
+    NoMatch(Request<Body>),
     BadRequest(Box<dyn std::error::Error>),
 }
 /// Convenience conversion which allows to use '?' in from_request() implementations.
@@ -65,7 +65,7 @@ pub fn run(addr: &str, database_file: &Path) {
                 end_point_handler::<CreateAtom>,
                 end_point_handler::<StaticAsset>,
             ];
-            process_request(&request, &state, handlers.iter())
+            process_request(request, &state, handlers.iter())
         })
     };
     let server = Server::bind(&addr)
@@ -84,40 +84,37 @@ pub fn run(addr: &str, database_file: &Path) {
     eprintln!("Database saved to {}", database_file.display());
 }
 
-fn end_point_handler<'r, E: EndPoint<'r>>(
-    request: &'r Request<Body>,
+fn end_point_handler<E: EndPoint>(
+    request: Request<Body>,
     state: &State,
 ) -> Result<Response<Body>, FromRequestError> {
     E::from_request(request).map(|e| e.generate_response(state))
 }
 
 /// Apply the first matching handler, or generate an error reponse (400 or 404).
-fn process_request<'r, 's, I>(
-    request: &'r Request<Body>,
-    state: &'s State,
-    handlers: I,
-) -> Response<Body>
+fn process_request<'s, I>(request: Request<Body>, state: &'s State, handlers: I) -> Response<Body>
 where
     I: Iterator,
-    <I as Iterator>::Item:
-        Fn(&'r Request<Body>, &'s State) -> Result<Response<Body>, FromRequestError>,
+    <I as Iterator>::Item: Fn(Request<Body>, &'s State) -> Result<Response<Body>, FromRequestError>,
 {
-    for handler in handlers {
-        match handler(request, state) {
-            Ok(response) => return response,
-            Err(FromRequestError::NoMatch) => (),
-            Err(FromRequestError::BadRequest(e)) => {
-                return Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from(e.to_string()))
-                    .unwrap();
-            }
-        }
+    let tried_all_handlers = handlers.fold(
+        Err(FromRequestError::NoMatch(request)),
+        |a, handler| match a {
+            Err(FromRequestError::NoMatch(r)) => handler(r, state),
+            a => a,
+        },
+    );
+    match tried_all_handlers {
+        Ok(response) => response,
+        Err(FromRequestError::NoMatch(_)) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap(),
+        Err(FromRequestError::BadRequest(e)) => Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(e.to_string()))
+            .unwrap(),
     }
-    Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .body(Body::empty())
-        .unwrap()
 }
 
 /******************************************************************************
@@ -179,13 +176,13 @@ impl DisplayElement {
         }
     }
 }
-impl<'r> EndPoint<'r> for DisplayElement {
+impl EndPoint for DisplayElement {
     fn url(&self) -> String {
         let mut b = uri::PathQueryBuilder::new(format!("/element/{}", self.index));
         self.edit_state.append_to_query(&mut b);
         b.build()
     }
-    fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => {
                 let query = uri::decode_optional_query_entries(r.uri().query())?;
@@ -194,7 +191,7 @@ impl<'r> EndPoint<'r> for DisplayElement {
                     edit_state: EditState::from_query(&query)?,
                 })
             }
-            _ => Err(FromRequestError::NoMatch),
+            _ => Err(FromRequestError::NoMatch(r)),
         }
     }
     fn generate_response(self, state: &State) -> Response<Body> {
@@ -237,13 +234,13 @@ fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -
 struct ListAllElements {
     edit_state: EditState,
 }
-impl<'r> EndPoint<'r> for ListAllElements {
+impl EndPoint for ListAllElements {
     fn url(&self) -> String {
         let mut b = uri::PathQueryBuilder::new("/all".into());
         self.edit_state.append_to_query(&mut b);
         b.build()
     }
-    fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/all") => {
                 let query = uri::decode_optional_query_entries(r.uri().query())?;
@@ -251,7 +248,7 @@ impl<'r> EndPoint<'r> for ListAllElements {
                     edit_state: EditState::from_query(&query)?,
                 })
             }
-            _ => Err(FromRequestError::NoMatch),
+            _ => Err(FromRequestError::NoMatch(r)),
         }
     }
     fn generate_response(self, state: &State) -> Response<Body> {
@@ -284,11 +281,11 @@ enum CreateAtom {
     Get { edit_state: EditState },
     Post,
 }
-impl<'r> EndPoint<'r> for CreateAtom {
+impl EndPoint for CreateAtom {
     fn url(&self) -> String {
         String::from("/create/atom")
     }
-    fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/create/atom") => {
                 let query = uri::decode_optional_query_entries(r.uri().query())?;
@@ -300,10 +297,10 @@ impl<'r> EndPoint<'r> for CreateAtom {
                 eprintln!("CreateAtomPost: {:?}", r); //FIXME body is a future::Stream... cannot match it there
                 Ok(CreateAtom::Post)
             }
-            _ => Err(FromRequestError::NoMatch),
+            _ => Err(FromRequestError::NoMatch(r)),
         }
     }
-    fn generate_response(self, state: &State) -> Response<Body> {
+    fn generate_response(self, _state: &State) -> Response<Body> {
         match self {
             CreateAtom::Get { edit_state } => {
                 let content = html! {
@@ -411,22 +408,22 @@ where
  */
 
 /// Static files.
-struct StaticAsset<'r> {
-    path: Cow<'r, str>,
+struct StaticAsset {
+    path: String,
 }
-impl<'r, T: Into<Cow<'r, str>>> From<T> for StaticAsset<'r> {
+impl<T: Into<String>> From<T> for StaticAsset {
     fn from(v: T) -> Self {
         StaticAsset { path: v.into() }
     }
 }
-impl<'r> EndPoint<'r> for StaticAsset<'r> {
+impl EndPoint for StaticAsset {
     fn url(&self) -> String {
         format!("/static/{}", self.path)
     }
-    fn from_request(r: &'r Request<Body>) -> Result<Self, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/static/")) {
             (&Method::GET, Some(path)) => Ok(path.into()),
-            _ => Err(FromRequestError::NoMatch),
+            _ => Err(FromRequestError::NoMatch(r)),
         }
     }
     fn generate_response(self, _state: &State) -> Response<Body> {
