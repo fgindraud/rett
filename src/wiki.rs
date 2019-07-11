@@ -11,6 +11,7 @@ use std::rc::Rc;
 
 use horrorshow::{self, Render, RenderOnce, Template};
 
+use self::web::{EndPoint, FromRequestError};
 use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
 use utils::{remove_prefix, Map};
 
@@ -22,28 +23,6 @@ use utils::{remove_prefix, Map};
 /// Wiki web interface state.
 struct State {
     database: RefCell<Database>,
-}
-
-/// Interface for an URL endpoint.
-trait EndPoint
-where
-    Self: Sized,
-{
-    fn url(&self) -> String;
-    fn from_request(request: Request<Body>) -> Result<Self, FromRequestError>;
-    fn generate_response(self, state: &State) -> Response<Body>;
-}
-
-/// Error code used for routing. BadRequest is used to stop matching with an error.
-enum FromRequestError {
-    NoMatch(Request<Body>),
-    BadRequest(Box<dyn std::error::Error>),
-}
-/// Convenience conversion which allows to use '?' in from_request() implementations.
-impl<E: Into<Box<dyn std::error::Error>>> From<E> for FromRequestError {
-    fn from(e: E) -> Self {
-        FromRequestError::BadRequest(e.into())
-    }
 }
 
 /// Entry point, run the wiki server.
@@ -60,12 +39,12 @@ pub fn run(addr: &str, database_file: &Path) {
         service_fn_ok(move |request| {
             // Move cloned rc ref in this scope.
             let handlers = [
-                end_point_handler::<ListAllElements>,
-                end_point_handler::<DisplayElement>,
-                end_point_handler::<CreateAtom>,
-                end_point_handler::<StaticAsset>,
+                web::end_point_handler::<ListAllElements>,
+                web::end_point_handler::<DisplayElement>,
+                web::end_point_handler::<CreateAtom>,
+                web::end_point_handler::<StaticAsset>,
             ];
-            process_request(request, &state, handlers.iter())
+            web::handle_request(request, state.as_ref(), handlers.iter())
         })
     };
     let server = Server::bind(&addr)
@@ -82,39 +61,6 @@ pub fn run(addr: &str, database_file: &Path) {
     current_thread::block_on_all(wiki).expect("Runtime error");
     super::write_database_to_file(database_file, &state.database.borrow());
     eprintln!("Database saved to {}", database_file.display());
-}
-
-fn end_point_handler<E: EndPoint>(
-    request: Request<Body>,
-    state: &State,
-) -> Result<Response<Body>, FromRequestError> {
-    E::from_request(request).map(|e| e.generate_response(state))
-}
-
-/// Apply the first matching handler, or generate an error reponse (400 or 404).
-fn process_request<'s, I>(request: Request<Body>, state: &'s State, handlers: I) -> Response<Body>
-where
-    I: Iterator,
-    <I as Iterator>::Item: Fn(Request<Body>, &'s State) -> Result<Response<Body>, FromRequestError>,
-{
-    let tried_all_handlers = handlers.fold(
-        Err(FromRequestError::NoMatch(request)),
-        |a, handler| match a {
-            Err(FromRequestError::NoMatch(r)) => handler(r, state),
-            a => a,
-        },
-    );
-    match tried_all_handlers {
-        Ok(response) => response,
-        Err(FromRequestError::NoMatch(_)) => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::empty())
-            .unwrap(),
-        Err(FromRequestError::BadRequest(e)) => Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from(e.to_string()))
-            .unwrap(),
-    }
 }
 
 /******************************************************************************
@@ -156,7 +102,7 @@ impl EditState {
             complement: query.get("complement").map(|s| s.parse()).transpose()?,
         })
     }
-    fn append_to_query(&self, builder: &mut uri::PathQueryBuilder) {
+    fn append_to_query(&self, builder: &mut web::PathQueryBuilder) {
         builder.optional_entry("subject", self.subject);
         builder.optional_entry("descriptor", self.descriptor);
         builder.optional_entry("complement", self.complement);
@@ -177,15 +123,16 @@ impl DisplayElement {
     }
 }
 impl EndPoint for DisplayElement {
+    type State = State;
     fn url(&self) -> String {
-        let mut b = uri::PathQueryBuilder::new(format!("/element/{}", self.index));
+        let mut b = web::PathQueryBuilder::new(format!("/element/{}", self.index));
         self.edit_state.append_to_query(&mut b);
         b.build()
     }
     fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => {
-                let query = uri::decode_optional_query_entries(r.uri().query())?;
+                let query = web::decode_optional_query_entries(r.uri().query())?;
                 Ok(DisplayElement {
                     index: index.parse()?,
                     edit_state: EditState::from_query(&query)?,
@@ -235,15 +182,16 @@ struct ListAllElements {
     edit_state: EditState,
 }
 impl EndPoint for ListAllElements {
+    type State = State;
     fn url(&self) -> String {
-        let mut b = uri::PathQueryBuilder::new("/all".into());
+        let mut b = web::PathQueryBuilder::new("/all".into());
         self.edit_state.append_to_query(&mut b);
         b.build()
     }
     fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/all") => {
-                let query = uri::decode_optional_query_entries(r.uri().query())?;
+                let query = web::decode_optional_query_entries(r.uri().query())?;
                 Ok(ListAllElements {
                     edit_state: EditState::from_query(&query)?,
                 })
@@ -282,13 +230,14 @@ enum CreateAtom {
     Post,
 }
 impl EndPoint for CreateAtom {
+    type State = State;
     fn url(&self) -> String {
         String::from("/create/atom")
     }
     fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/create/atom") => {
-                let query = uri::decode_optional_query_entries(r.uri().query())?;
+                let query = web::decode_optional_query_entries(r.uri().query())?;
                 Ok(CreateAtom::Get {
                     edit_state: EditState::from_query(&query)?,
                 })
@@ -417,6 +366,7 @@ impl<T: Into<String>> From<T> for StaticAsset {
     }
 }
 impl EndPoint for StaticAsset {
+    type State = State;
     fn url(&self) -> String {
         format!("/static/{}", self.path)
     }
@@ -470,16 +420,78 @@ mod lang {
 }
 
 /******************************************************************************
- * Wiki runtime utils.
+ * Wiki web related utils.
  */
 
-/// Uri related utilities
-mod uri {
+/// Web related utilities
+mod web {
     use percent_encoding::{percent_decode, utf8_percent_encode, PercentEncode, QUERY_ENCODE_SET};
     use relations;
     use std::borrow::Cow;
     use std::fmt::{self, Write};
     use utils::Map;
+
+    use hyper::{Body, Request, Response, StatusCode};
+
+    /// Interface for an URL endpoint.
+    pub trait EndPoint
+    where
+        Self: Sized,
+    {
+        type State: ?Sized;
+        fn url(&self) -> String;
+        fn from_request(request: Request<Body>) -> Result<Self, FromRequestError>;
+        fn generate_response(self, state: &Self::State) -> Response<Body>;
+    }
+
+    /// Error code used for routing. BadRequest is used to stop matching with an error.
+    pub enum FromRequestError {
+        NoMatch(Request<Body>),
+        BadRequest(Box<dyn std::error::Error>),
+    }
+    /// Convenience conversion which allows to use '?' in from_request() implementations.
+    impl<E: Into<Box<dyn std::error::Error>>> From<E> for FromRequestError {
+        fn from(e: E) -> Self {
+            FromRequestError::BadRequest(e.into())
+        }
+    }
+
+    pub fn end_point_handler<E: EndPoint>(
+        request: Request<Body>,
+        state: &E::State,
+    ) -> Result<Response<Body>, FromRequestError> {
+        E::from_request(request).map(|e| e.generate_response(state))
+    }
+
+    /// Apply the first matching handler, or generate an error reponse (400 or 404).
+    pub fn handle_request<'s, S, I>(
+        request: Request<Body>,
+        state: &'s S,
+        handlers: I,
+    ) -> Response<Body>
+    where
+        I: Iterator,
+        <I as Iterator>::Item: Fn(Request<Body>, &'s S) -> Result<Response<Body>, FromRequestError>,
+    {
+        let tried_all_handlers = handlers.fold(
+            Err(FromRequestError::NoMatch(request)),
+            |a, handler| match a {
+                Err(FromRequestError::NoMatch(r)) => handler(r, state),
+                a => a,
+            },
+        );
+        match tried_all_handlers {
+            Ok(response) => response,
+            Err(FromRequestError::NoMatch(_)) => Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::empty())
+                .unwrap(),
+            Err(FromRequestError::BadRequest(e)) => Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from(e.to_string()))
+                .unwrap(),
+        }
+    }
 
     #[derive(Debug)]
     pub enum ParsingError {
