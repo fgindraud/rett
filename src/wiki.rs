@@ -53,9 +53,9 @@ pub fn run(addr: &str, database_file: &Path) {
 
     let shutdown_signal = Signals::new(&[signal_hook::SIGTERM, signal_hook::SIGINT])
         .expect("Signal handler setup")
-        .into_async()
+        .into_async() // Stream of signals
         .expect("Signal handler to async")
-        .into_future();
+        .into_future(); // Only look at first signal
 
     let wiki = server.with_graceful_shutdown(shutdown_signal.map(|_| ()));
     current_thread::block_on_all(wiki).expect("Runtime error");
@@ -143,17 +143,10 @@ impl EndPoint for DisplayElement {
     }
     fn generate_response(self, state: &State) -> Response<Body> {
         match state.database.borrow().element(self.index) {
-            Ok(element) => Response::builder()
-                .status(StatusCode::OK)
-                .body(Body::from(display_element_page_content(
-                    element,
-                    &self.edit_state,
-                )))
-                .unwrap(),
-            Err(_) => Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap(),
+            Ok(element) => {
+                web::response_ok(display_element_page_content(element, &self.edit_state))
+            }
+            Err(_) => web::response_empty_404(),
         }
     }
 }
@@ -200,28 +193,22 @@ impl EndPoint for ListAllElements {
         }
     }
     fn generate_response(self, state: &State) -> Response<Body> {
-        Response::builder()
-            .status(StatusCode::OK)
-            .body(Body::from(show_all_elements_page_content(
-                &state.database.borrow(),
-                &self.edit_state,
-            )))
-            .unwrap()
-    }
-}
-fn show_all_elements_page_content(database: &Database, edit_state: &EditState) -> String {
-    let content = html! {
-        @ for element in database.iter() {
-            p {
-                a(href=DisplayElement::new(element.index(), edit_state).url(), class=css_class_name(element)) {
-                    : element.index();
-                    : " ";
-                    : element_name(element);
+        let database = &state.database.borrow();
+        let edit_state = &self.edit_state;
+        let content = html! {
+            @ for element in database.iter() {
+                p {
+                    a(href=DisplayElement::new(element.index(), edit_state).url(), class=css_class_name(element)) {
+                        : element.index();
+                        : " ";
+                        : element_name(element);
+                    }
                 }
             }
-        }
-    };
-    compose_wiki_page(lang::ALL_ELEMENTS, content, edit_state)
+        };
+        let page = compose_wiki_page(lang::ALL_ELEMENTS, content, edit_state);
+        web::response_ok(page)
+    }
 }
 
 /// Create an atom.
@@ -260,10 +247,7 @@ impl EndPoint for CreateAtom {
                     }
                 };
                 let page = compose_wiki_page(lang::CREATE_ATOM, content, &edit_state);
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Body::from(page))
-                    .unwrap()
+                web::response_ok(page)
             }
             CreateAtom::Post => unimplemented!(),
         }
@@ -384,10 +368,7 @@ impl EndPoint for StaticAsset {
                 .header("Cache-Control", "public, max-age=3600") // Allow cache for 1h
                 .body(Body::from(asset.content))
                 .unwrap(),
-            None => Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap(),
+            None => web::response_empty_404(),
         }
     }
 }
@@ -482,15 +463,27 @@ mod web {
         );
         match tried_all_handlers {
             Ok(response) => response,
-            Err(FromRequestError::NoMatch(_)) => Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap(),
+            Err(FromRequestError::NoMatch(_)) => response_empty_404(),
             Err(FromRequestError::BadRequest(e)) => Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .body(Body::from(e.to_string()))
                 .unwrap(),
         }
+    }
+
+    /// Create an ok response with a body.
+    pub fn response_ok<B: Into<Body>>(body: B) -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::OK)
+            .body(body.into())
+            .unwrap()
+    }
+    /// Create an empty 404 response.
+    pub fn response_empty_404() -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap()
     }
 
     #[derive(Debug)]
