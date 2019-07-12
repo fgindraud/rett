@@ -1,7 +1,8 @@
 use hyper::rt::{Future, Stream};
-use hyper::service::service_fn_ok;
+use hyper::service::service_fn;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use signal_hook::{self, iterator::Signals};
+use tokio::prelude::future;
 use tokio::runtime::current_thread;
 
 use std::borrow::Cow;
@@ -11,7 +12,7 @@ use std::rc::Rc;
 
 use horrorshow::{self, Render, RenderOnce, Template};
 
-use self::web::{EndPoint, FromRequestError};
+use self::web::{BoxedFuture, EndPoint, FromRequestError};
 use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
 use utils::{remove_prefix, Map};
 
@@ -36,7 +37,7 @@ pub fn run(addr: &str, database_file: &Path) {
 
     let create_service = || {
         let state = state.clone();
-        service_fn_ok(move |request| {
+        service_fn(move |request| {
             // Move cloned rc ref in this scope.
             let handlers = [
                 web::end_point_handler::<ListAllElements>,
@@ -44,7 +45,7 @@ pub fn run(addr: &str, database_file: &Path) {
                 web::end_point_handler::<CreateAtom>,
                 web::end_point_handler::<StaticAsset>,
             ];
-            web::handle_request(request, state.as_ref(), handlers.iter())
+            web::handle_request(request, state.clone(), handlers.iter())
         })
     };
     let server = Server::bind(&addr)
@@ -129,14 +130,14 @@ impl EndPoint for DisplayElement {
         self.edit_state.append_to_query(&mut b);
         b.build()
     }
-    fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => {
                 let query = web::decode_optional_query_entries(r.uri().query())?;
-                Ok(DisplayElement {
+                Ok(Box::new(future::ok(DisplayElement {
                     index: index.parse()?,
                     edit_state: EditState::from_query(&query)?,
-                })
+                })))
             }
             _ => Err(FromRequestError::NoMatch(r)),
         }
@@ -151,7 +152,7 @@ impl EndPoint for DisplayElement {
     }
 }
 fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -> String {
-    let nav = html! {};
+    let _nav = html! {};
     let name = element_name(element);
     let content = html! {
         h1(class=css_class_name(element)) : &name;
@@ -181,13 +182,13 @@ impl EndPoint for ListAllElements {
         self.edit_state.append_to_query(&mut b);
         b.build()
     }
-    fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/all") => {
                 let query = web::decode_optional_query_entries(r.uri().query())?;
-                Ok(ListAllElements {
+                Ok(Box::new(future::ok(ListAllElements {
                     edit_state: EditState::from_query(&query)?,
-                })
+                })))
             }
             _ => Err(FromRequestError::NoMatch(r)),
         }
@@ -221,17 +222,17 @@ impl EndPoint for CreateAtom {
     fn url(&self) -> String {
         String::from("/create/atom")
     }
-    fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/create/atom") => {
                 let query = web::decode_optional_query_entries(r.uri().query())?;
-                Ok(CreateAtom::Get {
+                Ok(Box::new(future::ok(CreateAtom::Get {
                     edit_state: EditState::from_query(&query)?,
-                })
+                })))
             }
             (&Method::POST, "/create/atom") => {
                 eprintln!("CreateAtomPost: {:?}", r); //FIXME body is a future::Stream... cannot match it there
-                Ok(CreateAtom::Post)
+                Ok(Box::new(future::ok(CreateAtom::Post)))
             }
             _ => Err(FromRequestError::NoMatch(r)),
         }
@@ -354,9 +355,9 @@ impl EndPoint for StaticAsset {
     fn url(&self) -> String {
         format!("/static/{}", self.path)
     }
-    fn from_request(r: Request<Body>) -> Result<Self, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/static/")) {
-            (&Method::GET, Some(path)) => Ok(path.into()),
+            (&Method::GET, Some(path)) => Ok(Box::new(future::ok(path.into()))),
             _ => Err(FromRequestError::NoMatch(r)),
         }
     }
@@ -412,7 +413,14 @@ mod web {
     use std::fmt::{self, Write};
     use utils::Map;
 
+    use hyper::rt::Future;
     use hyper::{Body, Request, Response, StatusCode};
+    use std::rc::Rc;
+    use tokio::prelude::future;
+
+    pub type BoxedError = Box<dyn std::error::Error>;
+    pub type BoxedFuture<T> = Box<dyn Future<Item = T, Error = BoxedError>>;
+    pub type ResponseBoxedFuture = Box<dyn Future<Item = Response<Body>, Error = hyper::Error>>;
 
     /// Interface for an URL endpoint.
     pub trait EndPoint
@@ -421,7 +429,7 @@ mod web {
     {
         type State: ?Sized;
         fn url(&self) -> String;
-        fn from_request(request: Request<Body>) -> Result<Self, FromRequestError>;
+        fn from_request(request: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError>;
         fn generate_response(self, state: &Self::State) -> Response<Body>;
     }
 
@@ -437,37 +445,50 @@ mod web {
         }
     }
 
-    pub fn end_point_handler<E: EndPoint>(
+    pub fn end_point_handler<E: EndPoint + 'static>(
         request: Request<Body>,
-        state: &E::State,
-    ) -> Result<Response<Body>, FromRequestError> {
-        E::from_request(request).map(|e| e.generate_response(state))
+        state: Rc<E::State>,
+    ) -> Result<ResponseBoxedFuture, FromRequestError> {
+        E::from_request(request).map(move |f| {
+            Box::new(f.then(move |e| {
+                match e {
+                    Ok(e) => Ok(e.generate_response(state.as_ref())),
+                    Err(e) => Ok(Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(Body::from(e.to_string()))
+                        .unwrap()),
+                }
+            })) as ResponseBoxedFuture
+        })
     }
 
     /// Apply the first matching handler, or generate an error reponse (400 or 404).
-    pub fn handle_request<'s, S, I>(
+    pub fn handle_request<S, I>(
         request: Request<Body>,
-        state: &'s S,
+        state: Rc<S>,
         handlers: I,
-    ) -> Response<Body>
+    ) -> ResponseBoxedFuture
     where
         I: Iterator,
-        <I as Iterator>::Item: Fn(Request<Body>, &'s S) -> Result<Response<Body>, FromRequestError>,
+        <I as Iterator>::Item:
+            Fn(Request<Body>, Rc<S>) -> Result<ResponseBoxedFuture, FromRequestError>,
     {
         let tried_all_handlers = handlers.fold(
             Err(FromRequestError::NoMatch(request)),
             |a, handler| match a {
-                Err(FromRequestError::NoMatch(r)) => handler(r, state),
+                Err(FromRequestError::NoMatch(r)) => handler(r, state.clone()),
                 a => a,
             },
         );
         match tried_all_handlers {
             Ok(response) => response,
-            Err(FromRequestError::NoMatch(_)) => response_empty_404(),
-            Err(FromRequestError::BadRequest(e)) => Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(Body::from(e.to_string()))
-                .unwrap(),
+            Err(FromRequestError::NoMatch(_)) => Box::new(future::ok(response_empty_404())),
+            Err(FromRequestError::BadRequest(e)) => Box::new(future::ok(
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(e.to_string()))
+                    .unwrap(),
+            )),
         }
     }
 
