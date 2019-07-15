@@ -4,16 +4,14 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use signal_hook::{self, iterator::Signals};
 use tokio::runtime::current_thread;
 
-use std::borrow::Cow;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
 use horrorshow::{self, Render, RenderOnce, Template};
 
-use self::web::{EndPoint, FromRequestError, FromRequestOk};
+use self::web::{remove_prefix, EndPoint, FromRequestError, FromRequestOk};
 use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
-use utils::{remove_prefix, Map};
 
 /******************************************************************************
  * Wiki runtime system.
@@ -91,22 +89,11 @@ impl web::QueryFormat for EditState {
         builder.optional_entry("descriptor", self.descriptor);
         builder.optional_entry("complement", self.complement);
     }
-}
-impl EditState {
-    fn empty() -> Self {
-        EditState {
-            subject: None,
-            descriptor: None,
-            complement: None,
-        }
-    }
-    fn from_query<'a>(
-        query: &Map<Cow<'a, str>, Cow<'a, str>>,
-    ) -> Result<Self, std::num::ParseIntError> {
+    fn from_query(entries: &web::DecodedQueryEntries) -> Result<Self, web::QueryParsingError> {
         Ok(EditState {
-            subject: query.get("subject").map(|s| s.parse()).transpose()?,
-            descriptor: query.get("descriptor").map(|s| s.parse()).transpose()?,
-            complement: query.get("complement").map(|s| s.parse()).transpose()?,
+            subject: entries.get("subject").map(|s| s.parse()).transpose()?,
+            descriptor: entries.get("descriptor").map(|s| s.parse()).transpose()?,
+            complement: entries.get("complement").map(|s| s.parse()).transpose()?,
         })
     }
 }
@@ -131,13 +118,10 @@ impl EndPoint for DisplayElement {
     }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
-            (&Method::GET, Some(index)) => {
-                let query = web::decode_optional_query_entries(r.uri().query())?;
-                Ok(FromRequestOk::Value(DisplayElement {
-                    index: index.parse()?,
-                    edit_state: EditState::from_query(&query)?,
-                }))
-            }
+            (&Method::GET, Some(index)) => Ok(FromRequestOk::Value(DisplayElement {
+                index: index.parse()?,
+                edit_state: web::from_query(r.uri().query())?,
+            })),
             _ => Err(FromRequestError::NoMatch(r)),
         }
     }
@@ -181,12 +165,9 @@ impl EndPoint for ListAllElements {
     }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
-            (&Method::GET, "/all") => {
-                let query = web::decode_optional_query_entries(r.uri().query())?;
-                Ok(FromRequestOk::Value(ListAllElements {
-                    edit_state: EditState::from_query(&query)?,
-                }))
-            }
+            (&Method::GET, "/all") => Ok(FromRequestOk::Value(ListAllElements {
+                edit_state: web::from_query(r.uri().query())?,
+            })),
             _ => Err(FromRequestError::NoMatch(r)),
         }
     }
@@ -221,12 +202,9 @@ impl EndPoint for CreateAtom {
     }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
-            (&Method::GET, "/create/atom") => {
-                let query = web::decode_optional_query_entries(r.uri().query())?;
-                Ok(FromRequestOk::Value(CreateAtom::Get {
-                    edit_state: EditState::from_query(&query)?,
-                }))
-            }
+            (&Method::GET, "/create/atom") => Ok(FromRequestOk::Value(CreateAtom::Get {
+                edit_state: web::from_query(r.uri().query())?,
+            })),
             (&Method::POST, "/create/atom") => {
                 eprintln!("CreateAtomPost: {:?}", r); //FIXME body is a future::Stream... cannot match it there
                 Ok(FromRequestOk::Value(CreateAtom::Post))
@@ -404,16 +382,18 @@ mod lang {
 
 /// Web related utilities
 mod web {
-    use std::borrow::Cow;
-    use utils::Map;
-
     use hyper::rt::Future;
     use hyper::{Body, Request, Response, StatusCode};
     use percent_encoding::{percent_decode, utf8_percent_encode, QUERY_ENCODE_SET};
+    use std::borrow::Cow;
     use std::fmt::{self, Write};
     use std::rc::Rc;
     use tokio::prelude::future;
+    use utils::Map;
 
+    /******************************************************************************
+     * Route selection.
+     */
     pub type BoxedFuture<T> = Box<dyn Future<Item = T, Error = hyper::Error>>;
 
     /// Interface for an URL endpoint.
@@ -496,6 +476,10 @@ mod web {
         }
     }
 
+    /******************************************************************************
+     * Short utility functions.
+     */
+
     /// Create an ok response with a body.
     pub fn response_ok<B: Into<Body>>(body: B) -> Response<Body> {
         Response::builder()
@@ -511,31 +495,37 @@ mod web {
             .unwrap()
     }
 
-    #[derive(Debug)]
-    pub enum ParsingError {
-        Utf8,
-        Structure,
-    }
-    impl fmt::Display for ParsingError {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            match self {
-                ParsingError::Utf8 => "query is not valid utf8".fmt(f),
-                ParsingError::Structure => "bad query structure".fmt(f),
-            }
-        }
-    }
-    impl std::error::Error for ParsingError {}
-
     /// Object can be represented as a query string.
     pub trait QueryFormat: Sized {
         fn to_query(&self, query: &mut PathQueryBuilder);
+        fn from_query(entries: &DecodedQueryEntries) -> Result<Self, QueryParsingError>;
     }
 
-    pub fn to_path_and_query<P: Into<String>, Q: QueryFormat>(path: P, query: &Q) -> String {
+    pub fn to_path_and_query<P: Into<String>, Q: QueryFormat>(path: P, q: &Q) -> String {
         let mut builder = PathQueryBuilder::new(path.into());
-        query.to_query(&mut builder);
+        q.to_query(&mut builder);
         builder.build()
     }
+
+    pub fn from_query<Q: QueryFormat>(query: Option<&str>) -> Result<Q, QueryParsingError> {
+        let entries = match query {
+            Some(q) => decode_query_entries(q)?,
+            None => Map::new(),
+        };
+        Q::from_query(&entries)
+    }
+
+    /// Remove prefix and return tail of string if successful
+    pub fn remove_prefix<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+        match s.get(..prefix.len()) {
+            Some(p) if p == prefix => Some(&s[prefix.len()..]),
+            _ => None,
+        }
+    }
+
+    /******************************************************************************
+     * Query writing tools.
+     */
 
     /// T as a url encoded representation.
     pub struct QueryFormattedValue<T>(T);
@@ -591,10 +581,32 @@ mod web {
         }
     }
 
+    /******************************************************************************
+     * Query parsing tools.
+     */
+
+    #[derive(Debug)]
+    pub struct QueryParsingError;
+    impl fmt::Display for QueryParsingError {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            "invalid query".fmt(f)
+        }
+    }
+    impl std::error::Error for QueryParsingError {}
+
+    // Explicit impl to make EditState::from_query work ; blank impl is not possible.
+    impl From<std::num::ParseIntError> for QueryParsingError {
+        fn from(_e: std::num::ParseIntError) -> Self {
+            QueryParsingError
+        }
+    }
+
+    pub type DecodedQueryEntries<'r> = Map<Cow<'r, str>, Cow<'r, str>>;
+
     /// Create a Map: str -> str from a query string.
-    pub fn decode_query_entries<'a>(
-        raw_query: &'a str,
-    ) -> Result<Map<Cow<'a, str>, Cow<'a, str>>, ParsingError> {
+    fn decode_query_entries<'r>(
+        raw_query: &'r str,
+    ) -> Result<DecodedQueryEntries<'r>, QueryParsingError> {
         raw_query
             .split('&')
             .map(|entry| {
@@ -605,22 +617,13 @@ mod web {
                         let decode = |s| {
                             percent_decode(s)
                                 .decode_utf8()
-                                .map_err(|_| ParsingError::Utf8)
+                                .map_err(|_| QueryParsingError)
                         };
                         Ok((decode(key.as_bytes())?, decode(value.as_bytes())?))
                     }
-                    _ => Err(ParsingError::Structure),
+                    _ => Err(QueryParsingError),
                 }
             })
             .collect()
-    }
-    /// Create a Map: str -> str from a query string, or default with an empty map.
-    pub fn decode_optional_query_entries<'a>(
-        raw_query: Option<&'a str>,
-    ) -> Result<Map<Cow<'a, str>, Cow<'a, str>>, ParsingError> {
-        match raw_query {
-            Some(s) => decode_query_entries(s),
-            None => Ok(Map::new()),
-        }
     }
 }

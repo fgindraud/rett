@@ -72,11 +72,3 @@ impl<K: Ord, V> FromIterator<(K, V)> for Map<K, V> {
         Map::from(Vec::from_iter(iter))
     }
 }
-
-/// Remove prefix and return tail of string if successful
-pub fn remove_prefix<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-    match s.get(..prefix.len()) {
-        Some(p) if p == prefix => Some(&s[prefix.len()..]),
-        _ => None,
-    }
-}
