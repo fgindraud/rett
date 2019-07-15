@@ -129,7 +129,7 @@ impl EndPoint for DisplayElement {
     fn generate_response(self, state: &State) -> Response<Body> {
         match state.database.borrow().element(self.index) {
             Ok(element) => {
-                web::response_ok(display_element_page_content(element, &self.edit_state))
+                web::response_html(display_element_page_content(element, &self.edit_state))
             }
             Err(_) => web::response_empty_404(),
         }
@@ -187,7 +187,7 @@ impl EndPoint for ListAllElements {
             }
         };
         let page = compose_wiki_page(lang::ALL_ELEMENTS, content, edit_state);
-        web::response_ok(page)
+        web::response_html(page)
     }
 }
 
@@ -208,24 +208,18 @@ impl EndPoint for CreateAtom {
             })),
             (&Method::POST, "/create/atom") => {
                 let edit_state = web::from_query(r.uri().query())?;
-                Ok(FromRequestOk::Future(Box::new(
-                    r.into_body()
-                        .concat2()
-                        .map_err(|_| web::Error::Internal)
-                        .and_then(move |body| {
-                            let entries = web::decode_entries(body.as_ref())?;
-                            let text = entries.get("text").ok_or(web::Error::BadRequest)?;
-                            Ok(CreateAtom::Post {
-                                text: text.to_string(),
-                                edit_state: edit_state,
-                            })
-                        }),
-                )))
+                Ok(web::with_post_entries(r, move |entries| {
+                    let text = entries.get("text").ok_or(web::Error::BadRequest)?;
+                    Ok(CreateAtom::Post {
+                        text: text.to_string(),
+                        edit_state: edit_state,
+                    })
+                }))
             }
             _ => Err(FromRequestError::NoMatch(r)),
         }
     }
-    fn generate_response(self, _state: &State) -> Response<Body> {
+    fn generate_response(self, state: &State) -> Response<Body> {
         match self {
             CreateAtom::Get { edit_state } => {
                 let content = html! {
@@ -236,9 +230,17 @@ impl EndPoint for CreateAtom {
                     }
                 };
                 let page = compose_wiki_page(lang::CREATE_ATOM, content, &edit_state);
-                web::response_ok(page)
+                web::response_html(page)
             }
-            CreateAtom::Post { text, edit_state } => unimplemented!(),
+            CreateAtom::Post { text, edit_state } => {
+                let index = state.database.borrow_mut().insert_atom(Atom::from(text));
+                let uri = DisplayElement {
+                    index: index,
+                    edit_state: edit_state,
+                }
+                .url();
+                web::response_redirection(&uri)
+            }
         }
     }
 }
@@ -395,7 +397,7 @@ mod lang {
 
 /// Web related utilities
 mod web {
-    use hyper::rt::Future;
+    use hyper::rt::{Future, Stream};
     use hyper::{Body, Request, Response, StatusCode};
     use percent_encoding::{percent_decode, utf8_percent_encode, QUERY_ENCODE_SET};
     use std::borrow::{Borrow, Cow};
@@ -518,9 +520,10 @@ mod web {
      */
 
     /// Create an ok response with a body.
-    pub fn response_ok<B: Into<Body>>(body: B) -> Response<Body> {
+    pub fn response_html<B: Into<Body>>(body: B) -> Response<Body> {
         Response::builder()
             .status(StatusCode::OK)
+            .header("Content-type", "text/html")
             .body(body.into())
             .unwrap()
     }
@@ -528,6 +531,14 @@ mod web {
     pub fn response_empty_404() -> Response<Body> {
         Response::builder()
             .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap()
+    }
+    /// Create a redirection.
+    pub fn response_redirection(uri: &str) -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::SEE_OTHER)
+            .header("Location", uri)
             .body(Body::empty())
             .unwrap()
     }
@@ -550,6 +561,26 @@ mod web {
             None => DecodedEntries::new(),
         };
         Q::from_query(&entries)
+    }
+
+    pub fn with_post_entries<E, F>(request: Request<Body>, f: F) -> FromRequestOk<E>
+    where
+        E: EndPoint + 'static,
+        F: FnOnce(DecodedEntries) -> Result<E, Error> + 'static,
+    {
+        // FIXME check mime type
+        FromRequestOk::Future(Box::new(
+            request
+                .into_body()
+                .concat2()
+                .map_err(|_| Error::Internal)
+                .and_then(move |body| {
+                    let entries = decode_entries(body.as_ref())?;
+                    eprintln!("Body {:?}\nEntries {:?}", body.as_ref(), entries);
+                    //FIXME spaces end up as '+'
+                    f(entries)
+                }),
+        ))
     }
 
     /// Remove prefix and return tail of string if successful
