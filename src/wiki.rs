@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use horrorshow::{self, Render, RenderOnce, Template};
 
-use self::web::{BoxedFuture, EndPoint, FromRequestError};
+use self::web::{EndPoint, FromRequestError, FromRequestOk};
 use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
 use utils::{remove_prefix, Map};
 
@@ -130,14 +130,14 @@ impl EndPoint for DisplayElement {
         self.edit_state.append_to_query(&mut b);
         b.build()
     }
-    fn from_request(r: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => {
                 let query = web::decode_optional_query_entries(r.uri().query())?;
-                Ok(Box::new(future::ok(DisplayElement {
+                Ok(FromRequestOk::Value(DisplayElement {
                     index: index.parse()?,
                     edit_state: EditState::from_query(&query)?,
-                })))
+                }))
             }
             _ => Err(FromRequestError::NoMatch(r)),
         }
@@ -182,13 +182,13 @@ impl EndPoint for ListAllElements {
         self.edit_state.append_to_query(&mut b);
         b.build()
     }
-    fn from_request(r: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/all") => {
                 let query = web::decode_optional_query_entries(r.uri().query())?;
-                Ok(Box::new(future::ok(ListAllElements {
+                Ok(FromRequestOk::Value(ListAllElements {
                     edit_state: EditState::from_query(&query)?,
-                })))
+                }))
             }
             _ => Err(FromRequestError::NoMatch(r)),
         }
@@ -222,17 +222,17 @@ impl EndPoint for CreateAtom {
     fn url(&self) -> String {
         String::from("/create/atom")
     }
-    fn from_request(r: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/create/atom") => {
                 let query = web::decode_optional_query_entries(r.uri().query())?;
-                Ok(Box::new(future::ok(CreateAtom::Get {
+                Ok(FromRequestOk::Value(CreateAtom::Get {
                     edit_state: EditState::from_query(&query)?,
-                })))
+                }))
             }
             (&Method::POST, "/create/atom") => {
                 eprintln!("CreateAtomPost: {:?}", r); //FIXME body is a future::Stream... cannot match it there
-                Ok(Box::new(future::ok(CreateAtom::Post)))
+                Ok(FromRequestOk::Value(CreateAtom::Post))
             }
             _ => Err(FromRequestError::NoMatch(r)),
         }
@@ -355,9 +355,9 @@ impl EndPoint for StaticAsset {
     fn url(&self) -> String {
         format!("/static/{}", self.path)
     }
-    fn from_request(r: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError> {
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/static/")) {
-            (&Method::GET, Some(path)) => Ok(Box::new(future::ok(path.into()))),
+            (&Method::GET, Some(path)) => Ok(FromRequestOk::Value(StaticAsset::from(path))),
             _ => Err(FromRequestError::NoMatch(r)),
         }
     }
@@ -418,22 +418,25 @@ mod web {
     use std::rc::Rc;
     use tokio::prelude::future;
 
-    pub type BoxedError = Box<dyn std::error::Error>;
-    pub type BoxedFuture<T> = Box<dyn Future<Item = T, Error = BoxedError>>;
-    pub type ResponseBoxedFuture = Box<dyn Future<Item = Response<Body>, Error = hyper::Error>>;
+    pub type BoxedFuture<T> = Box<dyn Future<Item = T, Error = hyper::Error>>;
+    pub type ResponseBoxedFuture = BoxedFuture<Response<Body>>;
 
     /// Interface for an URL endpoint.
-    pub trait EndPoint
-    where
-        Self: Sized,
-    {
+    pub trait EndPoint: Sized {
         type State: ?Sized;
         fn url(&self) -> String;
-        fn from_request(request: Request<Body>) -> Result<BoxedFuture<Self>, FromRequestError>;
+        fn from_request(request: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError>;
         fn generate_response(self, state: &Self::State) -> Response<Body>;
     }
 
-    /// Error code used for routing. BadRequest is used to stop matching with an error.
+    /// Result of from_request: either a direct value, or a future.
+    pub enum FromRequestOk<T> {
+        Value(T),
+        Future(BoxedFuture<T>),
+    }
+    /// Error code used for routing.
+    /// NoMatch returns the request so that it can be used by other handlers.
+    /// BadRequest is used to stop matching with an error.
     pub enum FromRequestError {
         NoMatch(Request<Body>),
         BadRequest(Box<dyn std::error::Error>),
@@ -449,16 +452,22 @@ mod web {
         request: Request<Body>,
         state: Rc<E::State>,
     ) -> Result<ResponseBoxedFuture, FromRequestError> {
-        E::from_request(request).map(move |f| {
-            Box::new(f.then(move |e| {
-                match e {
-                    Ok(e) => Ok(e.generate_response(state.as_ref())),
-                    Err(e) => Ok(Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Body::from(e.to_string()))
-                        .unwrap()),
+        E::from_request(request).map(move |ok_value| {
+            let response_future: ResponseBoxedFuture = match ok_value {
+                FromRequestOk::Value(v) => {
+                    Box::new(future::ok(v.generate_response(state.as_ref())))
                 }
-            })) as ResponseBoxedFuture
+                FromRequestOk::Future(f) => Box::new(f.then(move |end_point_value| {
+                    match end_point_value {
+                        Ok(e) => Ok(e.generate_response(state.as_ref())),
+                        Err(e) => Ok(Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .body(Body::from(e.to_string()))
+                            .unwrap()),
+                    }
+                })),
+            };
+            response_future
         })
     }
 
