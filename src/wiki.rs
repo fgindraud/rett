@@ -89,11 +89,12 @@ impl web::QueryFormat for EditState {
         builder.optional_entry("descriptor", self.descriptor);
         builder.optional_entry("complement", self.complement);
     }
-    fn from_query(entries: &web::DecodedQueryEntries) -> Result<Self, web::QueryParsingError> {
+    fn from_query(entries: &web::DecodedEntries) -> Result<Self, web::Error> {
+        let parse_index = |s: &str| s.parse::<usize>().map_err(|_| web::Error::BadRequest);
         Ok(EditState {
-            subject: entries.get("subject").map(|s| s.parse()).transpose()?,
-            descriptor: entries.get("descriptor").map(|s| s.parse()).transpose()?,
-            complement: entries.get("complement").map(|s| s.parse()).transpose()?,
+            subject: entries.get("subject").map(parse_index).transpose()?,
+            descriptor: entries.get("descriptor").map(parse_index).transpose()?,
+            complement: entries.get("complement").map(parse_index).transpose()?,
         })
     }
 }
@@ -119,7 +120,7 @@ impl EndPoint for DisplayElement {
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => Ok(FromRequestOk::Value(DisplayElement {
-                index: index.parse()?,
+                index: index.parse().map_err(|_| web::Error::BadRequest)?,
                 edit_state: web::from_query(r.uri().query())?,
             })),
             _ => Err(FromRequestError::NoMatch(r)),
@@ -193,7 +194,7 @@ impl EndPoint for ListAllElements {
 /// Create an atom.
 enum CreateAtom {
     Get { edit_state: EditState },
-    Post,
+    Post { text: String, edit_state: EditState },
 }
 impl EndPoint for CreateAtom {
     type State = State;
@@ -206,8 +207,20 @@ impl EndPoint for CreateAtom {
                 edit_state: web::from_query(r.uri().query())?,
             })),
             (&Method::POST, "/create/atom") => {
-                eprintln!("CreateAtomPost: {:?}", r); //FIXME body is a future::Stream... cannot match it there
-                Ok(FromRequestOk::Value(CreateAtom::Post))
+                let edit_state = web::from_query(r.uri().query())?;
+                Ok(FromRequestOk::Future(Box::new(
+                    r.into_body()
+                        .concat2()
+                        .map_err(|_| web::Error::Internal)
+                        .and_then(move |body| {
+                            let entries = web::decode_entries(body.as_ref())?;
+                            let text = entries.get("text").ok_or(web::Error::BadRequest)?;
+                            Ok(CreateAtom::Post {
+                                text: text.to_string(),
+                                edit_state: edit_state,
+                            })
+                        }),
+                )))
             }
             _ => Err(FromRequestError::NoMatch(r)),
         }
@@ -225,7 +238,7 @@ impl EndPoint for CreateAtom {
                 let page = compose_wiki_page(lang::CREATE_ATOM, content, &edit_state);
                 web::response_ok(page)
             }
-            CreateAtom::Post => unimplemented!(),
+            CreateAtom::Post { text, edit_state } => unimplemented!(),
         }
     }
 }
@@ -385,16 +398,41 @@ mod web {
     use hyper::rt::Future;
     use hyper::{Body, Request, Response, StatusCode};
     use percent_encoding::{percent_decode, utf8_percent_encode, QUERY_ENCODE_SET};
-    use std::borrow::Cow;
+    use std::borrow::{Borrow, Cow};
     use std::fmt::{self, Write};
+    use std::iter::FromIterator;
     use std::rc::Rc;
     use tokio::prelude::future;
-    use utils::Map;
+
+    #[derive(Debug)]
+    pub enum Error {
+        BadRequest,
+        Internal,
+    }
+    impl fmt::Display for Error {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            "error".fmt(f)
+        }
+    }
+    impl std::error::Error for Error {}
+    impl From<hyper::Error> for Error {
+        fn from(_: hyper::Error) -> Self {
+            Error::Internal
+        }
+    }
+    impl Error {
+        fn to_status_code(&self) -> StatusCode {
+            match self {
+                Error::BadRequest => StatusCode::BAD_REQUEST,
+                Error::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        }
+    }
 
     /******************************************************************************
      * Route selection.
      */
-    pub type BoxedFuture<T> = Box<dyn Future<Item = T, Error = hyper::Error>>;
+    pub type BoxedFuture<T> = Box<dyn Future<Item = T, Error = Error>>;
 
     /// Interface for an URL endpoint.
     pub trait EndPoint: Sized {
@@ -411,15 +449,14 @@ mod web {
     }
     /// Error code used for routing.
     /// NoMatch returns the request so that it can be used by other handlers.
-    /// BadRequest is used to stop matching with an error.
+    /// Error stops the routing.
     pub enum FromRequestError {
         NoMatch(Request<Body>),
-        BadRequest,
+        Error(Error),
     }
-    /// Convenience conversion which allows to use '?' in from_request() implementations.
-    impl<E: std::error::Error> From<E> for FromRequestError {
-        fn from(_e: E) -> Self {
-            FromRequestError::BadRequest
+    impl From<Error> for FromRequestError {
+        fn from(e: Error) -> Self {
+            FromRequestError::Error(e)
         }
     }
 
@@ -468,8 +505,8 @@ mod web {
             Ok(response) => response,
             Err(e) => Box::new(future::ok(match e {
                 FromRequestError::NoMatch(_) => response_empty_404(),
-                FromRequestError::BadRequest => Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
+                FromRequestError::Error(e) => Response::builder()
+                    .status(e.to_status_code())
                     .body(Body::empty())
                     .unwrap(),
             })),
@@ -498,7 +535,7 @@ mod web {
     /// Object can be represented as a query string.
     pub trait QueryFormat: Sized {
         fn to_query(&self, query: &mut PathQueryBuilder);
-        fn from_query(entries: &DecodedQueryEntries) -> Result<Self, QueryParsingError>;
+        fn from_query(entries: &DecodedEntries) -> Result<Self, Error>;
     }
 
     pub fn to_path_and_query<P: Into<String>, Q: QueryFormat>(path: P, q: &Q) -> String {
@@ -507,10 +544,10 @@ mod web {
         builder.build()
     }
 
-    pub fn from_query<Q: QueryFormat>(query: Option<&str>) -> Result<Q, QueryParsingError> {
+    pub fn from_query<Q: QueryFormat>(query: Option<&str>) -> Result<Q, Error> {
         let entries = match query {
-            Some(q) => decode_query_entries(q)?,
-            None => Map::new(),
+            Some(q) => decode_entries(q.as_bytes())?,
+            None => DecodedEntries::new(),
         };
         Q::from_query(&entries)
     }
@@ -582,46 +619,56 @@ mod web {
     }
 
     /******************************************************************************
-     * Query parsing tools.
+     * Url Decoding tools
      */
 
-    #[derive(Debug)]
-    pub struct QueryParsingError;
-    impl fmt::Display for QueryParsingError {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            "invalid query".fmt(f)
+    /// Associative map based on a sorted vector.
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct DecodedEntries<'r> {
+        inner: Vec<(Cow<'r, str>, Cow<'r, str>)>,
+    }
+    impl<'r> DecodedEntries<'r> {
+        pub fn new() -> Self {
+            DecodedEntries { inner: Vec::new() }
+        }
+        pub fn get<Q>(&self, k: &Q) -> Option<&str>
+        where
+            Cow<'r, str>: Borrow<Q>,
+            Q: Ord + ?Sized,
+        {
+            self.inner
+                .binary_search_by_key(&k, |p| p.0.borrow())
+                .map(|index| self.inner[index].1.as_ref())
+                .ok()
         }
     }
-    impl std::error::Error for QueryParsingError {}
-
-    // Explicit impl to make EditState::from_query work ; blank impl is not possible.
-    impl From<std::num::ParseIntError> for QueryParsingError {
-        fn from(_e: std::num::ParseIntError) -> Self {
-            QueryParsingError
+    impl<'r> FromIterator<(Cow<'r, str>, Cow<'r, str>)> for DecodedEntries<'r> {
+        fn from_iter<T>(iter: T) -> Self
+        where
+            T: IntoIterator<Item = (Cow<'r, str>, Cow<'r, str>)>,
+        {
+            let mut v = Vec::from_iter(iter);
+            v.sort_unstable_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
+            DecodedEntries { inner: v }
         }
     }
 
-    pub type DecodedQueryEntries<'r> = Map<Cow<'r, str>, Cow<'r, str>>;
-
-    /// Create a Map: str -> str from a query string.
-    fn decode_query_entries<'r>(
-        raw_query: &'r str,
-    ) -> Result<DecodedQueryEntries<'r>, QueryParsingError> {
-        raw_query
-            .split('&')
+    /// Create a Map: str -> str from a url-encoded (K,V) string.
+    pub fn decode_entries<'r>(raw: &'r [u8]) -> Result<DecodedEntries<'r>, Error> {
+        raw.split(|b| *b == b'&')
             .map(|entry| {
-                let mut it = entry.split('=');
+                let mut it = entry.split(|b| *b == b'=');
                 let fields = [it.next(), it.next(), it.next()];
                 match fields {
                     [Some(key), Some(value), None] => {
                         let decode = |s| {
                             percent_decode(s)
                                 .decode_utf8()
-                                .map_err(|_| QueryParsingError)
+                                .map_err(|_| Error::BadRequest)
                         };
-                        Ok((decode(key.as_bytes())?, decode(value.as_bytes())?))
+                        Ok((decode(key)?, decode(value)?))
                     }
-                    _ => Err(QueryParsingError),
+                    _ => Err(Error::BadRequest),
                 }
             })
             .collect()
