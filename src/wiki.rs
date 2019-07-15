@@ -208,13 +208,13 @@ impl EndPoint for CreateAtom {
             })),
             (&Method::POST, "/create/atom") => {
                 let edit_state = web::from_query(r.uri().query())?;
-                Ok(web::with_post_entries(r, move |entries| {
+                web::with_post_entries(r, move |entries| {
                     let text = entries.get("text").ok_or(web::Error::BadRequest)?;
                     Ok(CreateAtom::Post {
                         text: text.to_string(),
                         edit_state: edit_state,
                     })
-                }))
+                })
             }
             _ => Err(FromRequestError::NoMatch(r)),
         }
@@ -355,8 +355,8 @@ impl EndPoint for StaticAsset {
         match ASSETS.iter().find(|asset| asset.path == self.path) {
             Some(asset) => Response::builder()
                 .status(StatusCode::OK)
-                .header("Content-Type", asset.mime)
-                .header("Cache-Control", "public, max-age=3600") // Allow cache for 1h
+                .header(hyper::header::CONTENT_TYPE, asset.mime)
+                .header(hyper::header::CACHE_CONTROL, "public, max-age=3600") // Allow cache for 1h
                 .body(Body::from(asset.content))
                 .unwrap(),
             None => web::response_empty_404(),
@@ -397,6 +397,7 @@ mod lang {
 
 /// Web related utilities
 mod web {
+    use hyper::header;
     use hyper::rt::{Future, Stream};
     use hyper::{Body, Request, Response, StatusCode};
     use percent_encoding::{percent_decode, utf8_percent_encode, QUERY_ENCODE_SET};
@@ -523,7 +524,7 @@ mod web {
     pub fn response_html<B: Into<Body>>(body: B) -> Response<Body> {
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-type", "text/html")
+            .header(header::CONTENT_TYPE, "text/html")
             .body(body.into())
             .unwrap()
     }
@@ -538,7 +539,7 @@ mod web {
     pub fn response_redirection(uri: &str) -> Response<Body> {
         Response::builder()
             .status(StatusCode::SEE_OTHER)
-            .header("Location", uri)
+            .header(header::LOCATION, uri)
             .body(Body::empty())
             .unwrap()
     }
@@ -563,24 +564,45 @@ mod web {
         Q::from_query(&entries)
     }
 
-    pub fn with_post_entries<E, F>(request: Request<Body>, f: F) -> FromRequestOk<E>
+    pub fn with_post_entries<E, F>(
+        request: Request<Body>,
+        f: F,
+    ) -> Result<FromRequestOk<E>, FromRequestError>
     where
         E: EndPoint + 'static,
         F: FnOnce(DecodedEntries) -> Result<E, Error> + 'static,
     {
-        // FIXME check mime type
-        FromRequestOk::Future(Box::new(
-            request
-                .into_body()
-                .concat2()
-                .map_err(|_| Error::Internal)
-                .and_then(move |body| {
-                    let entries = decode_entries(body.as_ref())?;
-                    eprintln!("Body {:?}\nEntries {:?}", body.as_ref(), entries);
-                    //FIXME spaces end up as '+'
-                    f(entries)
-                }),
-        ))
+        match request.headers().get(header::CONTENT_TYPE) {
+            Some(t) if t == "application/x-www-form-urlencoded" => {
+                Ok(FromRequestOk::Future(Box::new(
+                    request
+                        .into_body()
+                        .concat2()
+                        .map_err(|_| Error::Internal)
+                        .and_then(move |body| {
+                            let body = www_form_encoding_replace_plus(body.as_ref());
+                            let entries = decode_entries(body.as_ref())?;
+                            f(entries)
+                        }),
+                )))
+            }
+            _ => Err(FromRequestError::Error(Error::BadRequest)),
+        }
+    }
+    fn www_form_encoding_replace_plus(input: &[u8]) -> Cow<[u8]> {
+        match input.iter().position(|b| *b == b'+') {
+            None => Cow::Borrowed(input),
+            Some(position) => {
+                let mut owned = input.to_owned();
+                owned[position] = b' ';
+                for b in &mut owned[position + 1..] {
+                    if *b == b'+' {
+                        *b = b' ';
+                    }
+                }
+                Cow::Owned(owned)
+            }
+        }
     }
 
     /// Remove prefix and return tail of string if successful
