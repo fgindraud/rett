@@ -2,7 +2,6 @@ use hyper::rt::{Future, Stream};
 use hyper::service::service_fn;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use signal_hook::{self, iterator::Signals};
-use tokio::prelude::future;
 use tokio::runtime::current_thread;
 
 use std::borrow::Cow;
@@ -86,6 +85,13 @@ struct EditState {
     descriptor: Option<Index>,
     complement: Option<Index>,
 }
+impl web::QueryFormat for EditState {
+    fn to_query(&self, builder: &mut web::PathQueryBuilder) {
+        builder.optional_entry("subject", self.subject);
+        builder.optional_entry("descriptor", self.descriptor);
+        builder.optional_entry("complement", self.complement);
+    }
+}
 impl EditState {
     fn empty() -> Self {
         EditState {
@@ -102,11 +108,6 @@ impl EditState {
             descriptor: query.get("descriptor").map(|s| s.parse()).transpose()?,
             complement: query.get("complement").map(|s| s.parse()).transpose()?,
         })
-    }
-    fn append_to_query(&self, builder: &mut web::PathQueryBuilder) {
-        builder.optional_entry("subject", self.subject);
-        builder.optional_entry("descriptor", self.descriptor);
-        builder.optional_entry("complement", self.complement);
     }
 }
 
@@ -126,9 +127,7 @@ impl DisplayElement {
 impl EndPoint for DisplayElement {
     type State = State;
     fn url(&self) -> String {
-        let mut b = web::PathQueryBuilder::new(format!("/element/{}", self.index));
-        self.edit_state.append_to_query(&mut b);
-        b.build()
+        web::to_path_and_query(format!("/element/{}", self.index), &self.edit_state)
     }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
@@ -178,9 +177,7 @@ struct ListAllElements {
 impl EndPoint for ListAllElements {
     type State = State;
     fn url(&self) -> String {
-        let mut b = web::PathQueryBuilder::new("/all".into());
-        self.edit_state.append_to_query(&mut b);
-        b.build()
+        web::to_path_and_query("/all", &self.edit_state)
     }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
@@ -407,19 +404,17 @@ mod lang {
 
 /// Web related utilities
 mod web {
-    use percent_encoding::{percent_decode, utf8_percent_encode, PercentEncode, QUERY_ENCODE_SET};
-    use relations;
     use std::borrow::Cow;
-    use std::fmt::{self, Write};
     use utils::Map;
 
     use hyper::rt::Future;
     use hyper::{Body, Request, Response, StatusCode};
+    use percent_encoding::{percent_decode, utf8_percent_encode, QUERY_ENCODE_SET};
+    use std::fmt::{self, Write};
     use std::rc::Rc;
     use tokio::prelude::future;
 
     pub type BoxedFuture<T> = Box<dyn Future<Item = T, Error = hyper::Error>>;
-    pub type ResponseBoxedFuture = BoxedFuture<Response<Body>>;
 
     /// Interface for an URL endpoint.
     pub trait EndPoint: Sized {
@@ -439,30 +434,30 @@ mod web {
     /// BadRequest is used to stop matching with an error.
     pub enum FromRequestError {
         NoMatch(Request<Body>),
-        BadRequest(Box<dyn std::error::Error>),
+        BadRequest,
     }
     /// Convenience conversion which allows to use '?' in from_request() implementations.
-    impl<E: Into<Box<dyn std::error::Error>>> From<E> for FromRequestError {
-        fn from(e: E) -> Self {
-            FromRequestError::BadRequest(e.into())
+    impl<E: std::error::Error> From<E> for FromRequestError {
+        fn from(_e: E) -> Self {
+            FromRequestError::BadRequest
         }
     }
 
     pub fn end_point_handler<E: EndPoint + 'static>(
         request: Request<Body>,
         state: Rc<E::State>,
-    ) -> Result<ResponseBoxedFuture, FromRequestError> {
+    ) -> Result<BoxedFuture<Response<Body>>, FromRequestError> {
         E::from_request(request).map(move |ok_value| {
-            let response_future: ResponseBoxedFuture = match ok_value {
+            let response_future: BoxedFuture<Response<Body>> = match ok_value {
                 FromRequestOk::Value(v) => {
                     Box::new(future::ok(v.generate_response(state.as_ref())))
                 }
                 FromRequestOk::Future(f) => Box::new(f.then(move |end_point_value| {
                     match end_point_value {
                         Ok(e) => Ok(e.generate_response(state.as_ref())),
-                        Err(e) => Ok(Response::builder()
+                        Err(_) => Ok(Response::builder()
                             .status(StatusCode::BAD_REQUEST)
-                            .body(Body::from(e.to_string()))
+                            .body(Body::empty())
                             .unwrap()),
                     }
                 })),
@@ -476,11 +471,11 @@ mod web {
         request: Request<Body>,
         state: Rc<S>,
         handlers: I,
-    ) -> ResponseBoxedFuture
+    ) -> BoxedFuture<Response<Body>>
     where
         I: Iterator,
         <I as Iterator>::Item:
-            Fn(Request<Body>, Rc<S>) -> Result<ResponseBoxedFuture, FromRequestError>,
+            Fn(Request<Body>, Rc<S>) -> Result<BoxedFuture<Response<Body>>, FromRequestError>,
     {
         let tried_all_handlers = handlers.fold(
             Err(FromRequestError::NoMatch(request)),
@@ -491,13 +486,13 @@ mod web {
         );
         match tried_all_handlers {
             Ok(response) => response,
-            Err(FromRequestError::NoMatch(_)) => Box::new(future::ok(response_empty_404())),
-            Err(FromRequestError::BadRequest(e)) => Box::new(future::ok(
-                Response::builder()
+            Err(e) => Box::new(future::ok(match e {
+                FromRequestError::NoMatch(_) => response_empty_404(),
+                FromRequestError::BadRequest => Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from(e.to_string()))
+                    .body(Body::empty())
                     .unwrap(),
-            )),
+            })),
         }
     }
 
@@ -531,22 +526,27 @@ mod web {
     }
     impl std::error::Error for ParsingError {}
 
-    /// Convertible to something printable in a query string
-    pub trait QueryFormat {
-        // This trait is an optimization over encode(to_string(T)) for some T.
-        type Output: fmt::Display;
-        fn to_query_format(&self) -> Self::Output;
+    /// Object can be represented as a query string.
+    pub trait QueryFormat: Sized {
+        fn to_query(&self, query: &mut PathQueryBuilder);
     }
-    impl QueryFormat for relations::Index {
-        type Output = relations::Index;
-        fn to_query_format(&self) -> Self::Output {
-            *self // Integers do not need URL-encoding
+
+    pub fn to_path_and_query<P: Into<String>, Q: QueryFormat>(path: P, query: &Q) -> String {
+        let mut builder = PathQueryBuilder::new(path.into());
+        query.to_query(&mut builder);
+        builder.build()
+    }
+
+    /// T as a url encoded representation.
+    pub struct QueryFormattedValue<T>(T);
+    impl fmt::Display for QueryFormattedValue<usize> {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            self.0.fmt(f)
         }
     }
-    impl<'a> QueryFormat for &'a str {
-        type Output = PercentEncode<'a, QUERY_ENCODE_SET>;
-        fn to_query_format(&self) -> Self::Output {
-            utf8_percent_encode(self, QUERY_ENCODE_SET) // Text needs URL-encoding
+    impl<'a> fmt::Display for QueryFormattedValue<&'a str> {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            utf8_percent_encode(self.0, QUERY_ENCODE_SET).fmt(f)
         }
     }
 
@@ -567,23 +567,23 @@ mod web {
         }
         pub fn entry<K, V>(&mut self, key: K, value: V)
         where
-            K: QueryFormat,
-            V: QueryFormat,
+            QueryFormattedValue<K>: fmt::Display,
+            QueryFormattedValue<V>: fmt::Display,
         {
             write!(
                 &mut self.path_and_query,
                 "{}{}={}",
                 self.query_prefix_char,
-                key.to_query_format(),
-                value.to_query_format()
+                QueryFormattedValue(key),
+                QueryFormattedValue(value)
             )
             .unwrap();
             self.query_prefix_char = '&' // Entries are ?first=v&second=v&...
         }
         pub fn optional_entry<K, V>(&mut self, key: K, value: Option<V>)
         where
-            K: QueryFormat,
-            V: QueryFormat,
+            QueryFormattedValue<K>: fmt::Display,
+            QueryFormattedValue<V>: fmt::Display,
         {
             if let Some(v) = value {
                 self.entry(key, v)
