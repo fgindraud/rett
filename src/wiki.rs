@@ -89,7 +89,7 @@ impl web::QueryFormat for EditState {
         builder.optional_entry("descriptor", self.descriptor);
         builder.optional_entry("complement", self.complement);
     }
-    fn from_query(entries: &web::DecodedEntries) -> Result<Self, web::Error> {
+    fn from_query(entries: &web::UrlDecodedEntries) -> Result<Self, web::Error> {
         let parse_index = |s: &str| s.parse::<usize>().map_err(|_| web::Error::BadRequest);
         Ok(EditState {
             subject: entries.get("subject").map(parse_index).transpose()?,
@@ -405,6 +405,7 @@ mod web {
     use std::fmt::{self, Write};
     use std::iter::FromIterator;
     use std::rc::Rc;
+    use std::str;
     use tokio::prelude::future;
 
     #[derive(Debug)]
@@ -423,9 +424,9 @@ mod web {
             Error::Internal
         }
     }
-    impl Error {
-        fn to_status_code(&self) -> StatusCode {
-            match self {
+    impl From<Error> for StatusCode {
+        fn from(e: Error) -> StatusCode {
+            match e {
                 Error::BadRequest => StatusCode::BAD_REQUEST,
                 Error::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             }
@@ -475,8 +476,8 @@ mod web {
                 FromRequestOk::Future(f) => Box::new(f.then(move |end_point_value| {
                     match end_point_value {
                         Ok(e) => Ok(e.generate_response(state.as_ref())),
-                        Err(_) => Ok(Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
+                        Err(e) => Ok(Response::builder()
+                            .status(StatusCode::from(e))
                             .body(Body::empty())
                             .unwrap()),
                     }
@@ -509,7 +510,7 @@ mod web {
             Err(e) => Box::new(future::ok(match e {
                 FromRequestError::NoMatch(_) => response_empty_404(),
                 FromRequestError::Error(e) => Response::builder()
-                    .status(e.to_status_code())
+                    .status(StatusCode::from(e))
                     .body(Body::empty())
                     .unwrap(),
             })),
@@ -547,7 +548,7 @@ mod web {
     /// Object can be represented as a query string.
     pub trait QueryFormat: Sized {
         fn to_query(&self, query: &mut PathQueryBuilder);
-        fn from_query(entries: &DecodedEntries) -> Result<Self, Error>;
+        fn from_query(entries: &UrlDecodedEntries) -> Result<Self, Error>;
     }
 
     pub fn to_path_and_query<P: Into<String>, Q: QueryFormat>(path: P, q: &Q) -> String {
@@ -558,8 +559,8 @@ mod web {
 
     pub fn from_query<Q: QueryFormat>(query: Option<&str>) -> Result<Q, Error> {
         let entries = match query {
-            Some(q) => decode_entries(q.as_bytes())?,
-            None => DecodedEntries::new(),
+            Some(q) => UrlDecodedEntries::decode(q.as_bytes())?,
+            None => UrlDecodedEntries::new(),
         };
         Q::from_query(&entries)
     }
@@ -570,7 +571,7 @@ mod web {
     ) -> Result<FromRequestOk<E>, FromRequestError>
     where
         E: EndPoint + 'static,
-        F: FnOnce(DecodedEntries) -> Result<E, Error> + 'static,
+        F: FnOnce(UrlDecodedEntries) -> Result<E, Error> + 'static,
     {
         match request.headers().get(header::CONTENT_TYPE) {
             Some(t) if t == "application/x-www-form-urlencoded" => {
@@ -580,28 +581,12 @@ mod web {
                         .concat2()
                         .map_err(|_| Error::Internal)
                         .and_then(move |body| {
-                            let body = www_form_encoding_replace_plus(body.as_ref());
-                            let entries = decode_entries(body.as_ref())?;
+                            let entries = UrlDecodedEntries::decode(body.as_ref())?;
                             f(entries)
                         }),
                 )))
             }
             _ => Err(FromRequestError::Error(Error::BadRequest)),
-        }
-    }
-    fn www_form_encoding_replace_plus(input: &[u8]) -> Cow<[u8]> {
-        match input.iter().position(|b| *b == b'+') {
-            None => Cow::Borrowed(input),
-            Some(position) => {
-                let mut owned = input.to_owned();
-                owned[position] = b' ';
-                for b in &mut owned[position + 1..] {
-                    if *b == b'+' {
-                        *b = b' ';
-                    }
-                }
-                Cow::Owned(owned)
-            }
         }
     }
 
@@ -677,13 +662,32 @@ mod web {
 
     /// Associative map based on a sorted vector.
     #[derive(Debug, PartialEq, Eq)]
-    pub struct DecodedEntries<'r> {
+    pub struct UrlDecodedEntries<'r> {
         inner: Vec<(Cow<'r, str>, Cow<'r, str>)>,
     }
-    impl<'r> DecodedEntries<'r> {
+    impl<'r> UrlDecodedEntries<'r> {
+        /// With no entries
         pub fn new() -> Self {
-            DecodedEntries { inner: Vec::new() }
+            UrlDecodedEntries { inner: Vec::new() }
         }
+        /// Decode entries from raw input.
+        pub fn decode(input: &'r [u8]) -> Result<Self, Error> {
+            input
+                .split(|b| *b == b'&')
+                .map(|entry| {
+                    let mut it = entry.split(|b| *b == b'=');
+                    let fields = [it.next(), it.next(), it.next()];
+                    match fields {
+                        [Some(key), Some(value), None] => {
+                            let decode = |s| decode_url(s).map_err(|_| Error::BadRequest);
+                            Ok((decode(key)?, decode(value)?))
+                        }
+                        _ => Err(Error::BadRequest),
+                    }
+                })
+                .collect()
+        }
+        /// Access entries by name.
         pub fn get<Q>(&self, k: &Q) -> Option<&str>
         where
             Cow<'r, str>: Borrow<Q>,
@@ -695,35 +699,47 @@ mod web {
                 .ok()
         }
     }
-    impl<'r> FromIterator<(Cow<'r, str>, Cow<'r, str>)> for DecodedEntries<'r> {
+    impl<'r> FromIterator<(Cow<'r, str>, Cow<'r, str>)> for UrlDecodedEntries<'r> {
         fn from_iter<T>(iter: T) -> Self
         where
             T: IntoIterator<Item = (Cow<'r, str>, Cow<'r, str>)>,
         {
             let mut v = Vec::from_iter(iter);
             v.sort_unstable_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
-            DecodedEntries { inner: v }
+            UrlDecodedEntries { inner: v }
         }
     }
 
-    /// Create a Map: str -> str from a url-encoded (K,V) string.
-    pub fn decode_entries<'r>(raw: &'r [u8]) -> Result<DecodedEntries<'r>, Error> {
-        raw.split(|b| *b == b'&')
-            .map(|entry| {
-                let mut it = entry.split(|b| *b == b'=');
-                let fields = [it.next(), it.next(), it.next()];
-                match fields {
-                    [Some(key), Some(value), None] => {
-                        let decode = |s| {
-                            percent_decode(s)
-                                .decode_utf8()
-                                .map_err(|_| Error::BadRequest)
-                        };
-                        Ok((decode(key)?, decode(value)?))
+    fn replace_plus_with_space<'a>(input: &'a [u8]) -> Cow<'a, [u8]> {
+        match input.iter().position(|b| *b == b'+') {
+            None => Cow::Borrowed(input),
+            Some(position) => {
+                let mut owned = input.to_owned();
+                owned[position] = b' ';
+                for b in &mut owned[position + 1..] {
+                    if *b == b'+' {
+                        *b = b' ';
                     }
-                    _ => Err(Error::BadRequest),
                 }
-            })
-            .collect()
+                Cow::Owned(owned)
+            }
+        }
+    }
+    fn from_utf8<'a>(input: Cow<'a, [u8]>) -> Result<Cow<'a, str>, str::Utf8Error> {
+        match input {
+            Cow::Borrowed(bytes) => str::from_utf8(bytes).map(|s| Cow::Borrowed(s)),
+            Cow::Owned(bytes) => match String::from_utf8(bytes) {
+                Ok(s) => Ok(Cow::Owned(s)),
+                Err(e) => Err(e.utf8_error()),
+            },
+        }
+    }
+    fn decode_url<'a>(input: &'a [u8]) -> Result<Cow<'a, str>, str::Utf8Error> {
+        let replaced = replace_plus_with_space(input);
+        let decoded = match percent_decode(&replaced).if_any() {
+            Some(vec) => Cow::Owned(vec),
+            None => replaced,
+        };
+        from_utf8(decoded)
     }
 }
