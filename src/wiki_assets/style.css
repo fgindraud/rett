@@ -18,16 +18,28 @@ a.atom:hover { background-color: #390; }
 a.relation:hover { background-color: #068; }
 a.abstract:hover { background-color: #c00; }
 
-/* Let navigation box float stick to the page border. */
+/* Navigation as left column, main box on the right (fill width). */
 body {
 	margin: 0;
+	display: flex;
+	flex-direction: row;
+	align-items: flex-start;
+	font-family: sans-serif;
+}
+nav {
+	flex-grow: 0;
+}
+main {
+	flex-grow: 1;
+	margin: 0.2em;
 }
 
-/* Navigation bar of vertically stacked boxes, stuck to the upper right side. */
+/* Navigation bar of vertically stacked boxes, stuck to the upper left side.
+ * <nav> should contains only <a> elements, each one representing a link.
+ * If tagged by type, colors are applied to it.
+ */
 nav {
-	float: right;
 	border: 2px solid grey;
-	border-right: none;
 	text-align: center;
 }
 nav a {
@@ -41,18 +53,13 @@ nav a {
 nav a:first-child { border-top: none; }
 nav a:hover { background-color: #bbb; }
 
-/* Define as overlay: over the screen. Suitable for hbox/vbox. */
-.overlay {
-	position: fixed;
-	top: 0;
-	left: 0;
-	height: 100%;
-	width: 100%;
-	padding: 5px;
-	background-color: white;
+/* For title only. */
+h1 {
+	margin-top: 0;
+	text-align: center;
 }
 
-/* vertical/horizontal containers, with scaling */
+/* vertical/horizontal containers, with auto scaling */
 .vbox, .hbox {
 	display: flex;
 	align-items: stretch;
@@ -75,8 +82,8 @@ nav a:hover { background-color: #bbb; }
 .button {
 	background-color: #eee;
 	color: blue;
-	font-family: monospace;
-	font-size: 1em;
+	font-size: 1em; /* Same font size for both <a> and <input> */
+	padding: 0.5em;
 }
 .button:hover {
 	background-color: #ccc;
@@ -90,15 +97,19 @@ a.button {
 input.button {
 	display: block;
 	border: none;
-	text-decoration: none;
-	padding: 0;
 }
 
-/* TODO continue */
-h1 {
-	/* Title will be too wide on smartphones... */
-	margin-top: 0;
-	text-align: center;
+/* FIXME what follows is currently unused... keep or remove */
+
+/* Define as overlay: over the screen. Suitable for hbox/vbox. */
+.overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	height: 100%;
+	width: 100%;
+	padding: 5px;
+	background-color: white;
 }
 
 /* Content specific rules */

@@ -176,6 +176,7 @@ impl EndPoint for ListAllElements {
         let database = &state.database.borrow();
         let edit_state = &self.edit_state;
         let content = html! {
+            h1 : lang::ALL_ELEMENTS_TITLE;
             @ for element in database.iter() {
                 p {
                     a(href=DisplayElement::new(element.index(), edit_state).url(), class=css_class_name(element)) {
@@ -186,7 +187,7 @@ impl EndPoint for ListAllElements {
                 }
             }
         };
-        let page = compose_wiki_page(lang::ALL_ELEMENTS, content, edit_state);
+        let page = compose_wiki_page(lang::ALL_ELEMENTS_TITLE, content, edit_state);
         web::response_html(page)
     }
 }
@@ -197,6 +198,7 @@ enum CreateAtom {
     Post { text: String, edit_state: EditState },
 }
 impl EndPoint for CreateAtom {
+    //TODO implement preview button: fuzzy search current text content and propose similar atoms
     type State = State;
     fn url(&self) -> String {
         String::from("/create/atom")
@@ -223,13 +225,16 @@ impl EndPoint for CreateAtom {
         match self {
             CreateAtom::Get { edit_state } => {
                 let content = html! {
-                    form(method="post") {
-                        : "Value:";
-                        input(type="text", name="text");
-                        input(type="submit", value="Create");
+                    h1(class="atom") : lang::CREATE_ATOM_TITLE;
+                    form(method="post", class="vbox") {
+                        input(type="text", name="text", required, placeholder=lang::ATOM_TEXT);
+                        div(class="hbox") {
+                            input(type="submit", name="preview", value=lang::PREVIEW_BUTTON, class="button");
+                            input(type="submit", name="create", value=lang::COMMIT_BUTTON, class="button");
+                        }
                     }
                 };
-                let page = compose_wiki_page(lang::CREATE_ATOM, content, &edit_state);
+                let page = compose_wiki_page(lang::CREATE_ATOM_TITLE, content, &edit_state);
                 web::response_html(page)
             }
             CreateAtom::Post { text, edit_state } => {
@@ -309,8 +314,8 @@ where
             body {
                 nav {
                     a(href="/") : "Home";
-                    a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : lang::ALL_ELEMENTS;
-                    a(href=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="atom") : lang::CREATE_ATOM;
+                    a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : lang::ALL_ELEMENTS_NAV;
+                    a(href=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="atom") : lang::CREATE_ATOM_NAV;
                     a(href="/create/abstract", class="abstract") : lang::CREATE_ABSTRACT;
                     // TODO other
                 }
@@ -322,6 +327,25 @@ where
         }
     };
     template.into_string().unwrap()
+}
+
+/******************************************************************************
+ * Language.
+ */
+mod lang {
+    pub const COMMIT_BUTTON: &'static str = "Valider";
+    pub const PREVIEW_BUTTON: &'static str = "Prévisualiser";
+
+    pub const ALL_ELEMENTS_NAV: &'static str = "Éléments";
+    pub const ALL_ELEMENTS_TITLE: &'static str = "Liste des éléments";
+
+    pub const CREATE_ATOM_NAV: &'static str = "Atome...";
+    pub const CREATE_ATOM_TITLE: &'static str = "Ajouter un atome...";
+    pub const ATOM_TEXT: &'static str = "Texte";
+
+    pub const CREATE_ABSTRACT: &'static str = "Abstrait...";
+
+    pub const NAMED_ATOM: &'static str = "est nommé";
 }
 
 /******************************************************************************
@@ -380,16 +404,6 @@ const ASSETS: [AssetDefinition; 2] = [
         content: include_str!("wiki_assets/client.js"),
     },
 ];
-
-/******************************************************************************
- * Language.
- */
-mod lang {
-    pub const ALL_ELEMENTS: &'static str = "Éléments";
-    pub const CREATE_ATOM: &'static str = "Atome...";
-    pub const CREATE_ABSTRACT: &'static str = "Abstrait...";
-    pub const NAMED_ATOM: &'static str = "est nommé";
-}
 
 /******************************************************************************
  * Wiki web related utils.
