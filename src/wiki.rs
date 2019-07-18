@@ -37,6 +37,7 @@ pub fn run(addr: &str, database_file: &Path) {
         service_fn(move |request| {
             // Move cloned rc ref in this scope.
             let handlers = [
+                web::end_point_handler::<Homepage>,
                 web::end_point_handler::<ListAllElements>,
                 web::end_point_handler::<DisplayElement>,
                 web::end_point_handler::<CreateAtom>,
@@ -155,7 +156,35 @@ fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -
     compose_wiki_page(&name, content, edit_state)
 }
 
-/// List all elements
+/// Homepage : links to selected elements.
+struct Homepage {
+    edit_state: EditState,
+}
+impl EndPoint for Homepage {
+    type State = State;
+    fn url(&self) -> String {
+        String::from("/")
+    }
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
+        match (r.method(), r.uri().path()) {
+            (&Method::GET, "/") => Ok(FromRequestOk::Value(Homepage {
+                edit_state: web::from_query(r.uri().query())?,
+            })),
+            _ => Err(FromRequestError::NoMatch(r)),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        let database = &state.database.borrow(); //TODO finish
+        let edit_state = &self.edit_state;
+        let content = html! {
+            h1 : lang::HOMEPAGE;
+        };
+        let page = compose_wiki_page(lang::HOMEPAGE, content, edit_state);
+        web::response_html(page)
+    }
+}
+
+/// List all elements.
 struct ListAllElements {
     edit_state: EditState,
 }
@@ -313,11 +342,11 @@ where
             }
             body {
                 nav {
-                    a(href="/") : "Home";
+                    a(href=Homepage{edit_state: edit_state.clone()}.url()) : lang::HOMEPAGE;
                     a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : lang::ALL_ELEMENTS_NAV;
                     a(href=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="atom") : lang::CREATE_ATOM_NAV;
                     a(href="/create/abstract", class="abstract") : lang::CREATE_ABSTRACT;
-                    // TODO other
+                    // TODO other, buttons for relation edition (select (sub, desc, comp) + create)
                 }
                 main {
                     : content;
@@ -335,6 +364,8 @@ where
 mod lang {
     pub const COMMIT_BUTTON: &'static str = "Valider";
     pub const PREVIEW_BUTTON: &'static str = "Prévisualiser";
+
+    pub const HOMEPAGE: &'static str = "Accueil";
 
     pub const ALL_ELEMENTS_NAV: &'static str = "Éléments";
     pub const ALL_ELEMENTS_TITLE: &'static str = "Liste des éléments";
