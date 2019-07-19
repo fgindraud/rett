@@ -65,27 +65,32 @@ h1 {
 	align-items: stretch;
 	justify-content: space-between;
 }
-.vbox > .hbox, .hbox > .vbox, .vbox > .button, .hbox > .button {
-	flex-grow: 1;
-}
 .vbox {
 	height: 100%;
 	flex-direction: column;
 }
-.vbox > * { margin-top: 5px; }
+.hbox {
+	flex-direction: row;
+}
+.vbox > * {
+	margin-top: 5px;
+	flex-grow: 1;
+}
 .vbox > *:first-child { margin-top: 0; }
-.hbox { flex-direction: row; }
-.hbox > * { margin-left: 5px; }
+.hbox > * {
+	margin-left: 5px;
+	flex-grow: 1;
+}
 .hbox > *:first-child { margin-left: 0; }
 
-/* Button objects for use in containers. */
-.button {
+/* Homogeneous buttons for both <a> and <button> (in form). */
+button, a.button {
 	background-color: #eee;
 	color: blue;
-	font-size: 1em; /* Same font size for both <a> and <input> */
+	font-size: 1em;
 	padding: 0.5em;
 }
-.button:hover {
+button:hover, a.button:hover {
 	background-color: #ccc;
 }
 a.button {
@@ -94,7 +99,7 @@ a.button {
 	align-items: center;
 	text-decoration: none;
 }
-input.button {
+button {
 	display: block;
 	border: none;
 }

@@ -163,7 +163,7 @@ struct Homepage {
 impl EndPoint for Homepage {
     type State = State;
     fn url(&self) -> String {
-        String::from("/")
+        web::to_path_and_query("/", &self.edit_state)
     }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
@@ -193,7 +193,7 @@ impl EndPoint for Homepage {
             }
             form(method="post", action=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="hbox") {
                 p(class="fill_box") : lang::HOMEPAGE_HELP;
-                input(type="submit", value="_wiki_homepage", class="button");
+                button(type="submit") : "_wiki_homepage";
                 input(type="hidden", name="text", value="_wiki_homepage");
             }
         };
@@ -281,8 +281,8 @@ impl EndPoint for CreateAtom {
                     form(method="post", class="vbox") {
                         input(type="text", name="text", required, placeholder=lang::ATOM_TEXT);
                         div(class="hbox") {
-                            input(type="submit", name="preview", value=lang::PREVIEW_BUTTON, class="button");
-                            input(type="submit", name="create", value=lang::COMMIT_BUTTON, class="button");
+                            button(type="submit", name="preview") : lang::PREVIEW_BUTTON;
+                            button(type="submit", name="create") : lang::COMMIT_BUTTON;
                         }
                     }
                 };
