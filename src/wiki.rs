@@ -41,6 +41,7 @@ pub fn run(addr: &str, database_file: &Path) {
                 web::end_point_handler::<ListAllElements>,
                 web::end_point_handler::<DisplayElement>,
                 web::end_point_handler::<CreateAtom>,
+                web::end_point_handler::<CreateAbstract>,
                 web::end_point_handler::<StaticAsset>,
             ];
             web::handle_request(request, state.clone(), handlers.iter())
@@ -264,10 +265,8 @@ impl EndPoint for CreateAtom {
                 let edit_state = web::from_query(r.uri().query())?;
                 web::with_post_entries(r, move |entries| {
                     let text = entries.get("text").ok_or(web::Error::BadRequest)?;
-                    Ok(CreateAtom::Post {
-                        text: text.to_string(),
-                        edit_state: edit_state,
-                    })
+                    let text = text.to_string();
+                    Ok(CreateAtom::Post { text, edit_state })
                 })
             }
             _ => Err(FromRequestError::NoMatch(r)),
@@ -291,11 +290,80 @@ impl EndPoint for CreateAtom {
             }
             CreateAtom::Post { text, edit_state } => {
                 let index = state.database.borrow_mut().insert_atom(Atom::from(text));
-                let uri = DisplayElement {
-                    index: index,
-                    edit_state: edit_state,
+                let uri = DisplayElement { index, edit_state }.url();
+                web::response_redirection(&uri)
+            }
+        }
+    }
+}
+
+/// Create an atom.
+enum CreateAbstract {
+    Get {
+        edit_state: EditState,
+    },
+    Post {
+        name: Option<String>,
+        edit_state: EditState,
+    },
+}
+impl EndPoint for CreateAbstract {
+    type State = State;
+    fn url(&self) -> String {
+        let edit_state = match self {
+            CreateAbstract::Get { edit_state } => edit_state,
+            CreateAbstract::Post { edit_state, .. } => edit_state,
+        };
+        web::to_path_and_query("/create/abstract", edit_state)
+    }
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
+        match (r.method(), r.uri().path()) {
+            (&Method::GET, "/create/abstract") => Ok(FromRequestOk::Value(CreateAbstract::Get {
+                edit_state: web::from_query(r.uri().query())?,
+            })),
+            (&Method::POST, "/create/abstract") => {
+                let edit_state = web::from_query(r.uri().query())?;
+                web::with_post_entries(r, move |entries| {
+                    let name = entries.get("name").ok_or(web::Error::BadRequest)?;
+                    let name = match name {
+                        "" => None,
+                        _ => Some(name.to_string()),
+                    };
+                    Ok(CreateAbstract::Post { name, edit_state })
+                })
+            }
+            _ => Err(FromRequestError::NoMatch(r)),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        match self {
+            CreateAbstract::Get { edit_state } => {
+                let content = html! {
+                    h1(class="atom") : lang::CREATE_ABSTRACT_TITLE;
+                    form(method="post", class="vbox") {
+                        input(type="text", name="name", placeholder=lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
+                        div(class="hbox") {
+                            button(type="submit", name="preview") : lang::PREVIEW_BUTTON;
+                            button(type="submit", name="create") : lang::COMMIT_BUTTON;
+                        }
+                    }
+                };
+                let page = compose_wiki_page(lang::CREATE_ABSTRACT_TITLE, content, &edit_state);
+                web::response_html(page)
+            }
+            CreateAbstract::Post { name, edit_state } => {
+                let database = &mut state.database.borrow_mut();
+                let index = database.create_abstract_element();
+                if let Some(name) = name {
+                    let name_element = database.insert_atom(Atom::from(name));
+                    let is_named_atom = database.insert_atom(Atom::from(lang::NAMED_ATOM));
+                    let _naming_relation = database.insert_relation(Relation {
+                        subject: index,
+                        descriptor: is_named_atom,
+                        complement: Some(name_element),
+                    });
                 }
-                .url();
+                let uri = DisplayElement { index, edit_state }.url();
                 web::response_redirection(&uri)
             }
         }
@@ -368,7 +436,7 @@ where
                     a(href=Homepage{edit_state: edit_state.clone()}.url()) : lang::HOMEPAGE;
                     a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : lang::ALL_ELEMENTS_NAV;
                     a(href=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="atom") : lang::CREATE_ATOM_NAV;
-                    a(href="/create/abstract", class="abstract") : lang::CREATE_ABSTRACT;
+                    a(href=CreateAbstract::Get{edit_state: edit_state.clone()}.url(), class="abstract") : lang::CREATE_ABSTRACT_NAV;
                     // TODO other, buttons for relation edition (select (sub, desc, comp) + create)
                 }
                 main {
@@ -399,7 +467,9 @@ mod lang {
     pub const CREATE_ATOM_TITLE: &'static str = "Ajouter un atome...";
     pub const ATOM_TEXT: &'static str = "Texte";
 
-    pub const CREATE_ABSTRACT: &'static str = "Abstrait...";
+    pub const CREATE_ABSTRACT_NAV: &'static str = "Abstrait...";
+    pub const CREATE_ABSTRACT_TITLE: &'static str = "Ajouter un élément abstrait...";
+    pub const CREATE_ABSTRACT_NAME_PLACEHOLDER: &'static str = "Nom optionel";
 
     pub const NAMED_ATOM: &'static str = "est nommé";
 }

@@ -571,8 +571,8 @@ mod tests {
         let object_i = db.create_abstract_element();
         let object_ref = db.element(object_i).unwrap();
         let copy = object_ref.clone();
-        let copy2 = copy;
-        let copy3 = copy;
+        let _copy2 = copy;
+        let _copy3 = copy;
     }
 
     #[test]
@@ -651,7 +651,7 @@ mod tests {
             descriptor: is_named_i,
             complement: Some(name_i),
         };
-        let relation_i = db.insert_relation(relation.clone()).unwrap();
+        let _relation_i = db.insert_relation(relation.clone()).unwrap();
 
         // Serialization
         let mut serialized: Vec<u8> = Vec::new();

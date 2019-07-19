@@ -123,27 +123,6 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
     wiki_page(&name, nav, content)
 }
 
-fn page_create_abstract() -> Response {
-    let content = html! {
-        form(method="post") {
-            : "Optional name:";
-            input(type="text", name="name");
-            input(type="submit", value="Create");
-        }
-    };
-    wiki_page("Create abstract", html!{}, content)
-}
-fn post_create_abstract(request: &Request, graph: &mut Graph) -> Response {
-    let form_data = try_or_400!(post_input!(request, { name: String }));
-    let name = form_data.name.trim();
-    let abstract_index = graph.create_abstract();
-    if name != "" {
-        let atom = graph.use_atom(Atom::text(name));
-        let _ = try_or_400!(graph.use_link(Link::new(atom, abstract_index)));
-    }
-    Response::redirect_303(object_url(abstract_index))
-}
-
 fn page_create_link<'a>(object: ObjectRef<'a>, link_side: LinkSide) -> Response {
     let defined_link_side_text = match link_side {
         LinkSide::From => "from",
