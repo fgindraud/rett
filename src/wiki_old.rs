@@ -123,61 +123,6 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
     wiki_page(&name, nav, content)
 }
 
-fn main_page(graph: &Graph) -> Response {
-    if let Some(wiki_main) = graph.get_atom(&Atom::text("_wiki_main")) {
-        if let Some(out_link) = wiki_main.out_links().first() {
-            if let Object::Link(ref l) = *out_link {
-                return Response::redirect_303(object_url(l.to));
-            }
-        }
-    }
-    let content = html! {
-        p : "Create a link from \"_wiki_main\" to a graph object to define it as the home page.";
-    };
-    wiki_page("Main page", html!{}, content)
-}
-
-fn page_all_objects(graph: &Graph) -> Response {
-    let content = html! {
-        h1(class="atom") : "Atoms";
-        ul {
-            @ for object in graph.objects().filter(|o| o.is_atom()) {
-                li : object_link(object);
-            }
-        }
-        h1(class="abstract") : "Abstract";
-        ul {
-            @ for object in graph.objects().filter(|o| o.is_abstract()) {
-                li : object_link(object);
-            }
-        }
-        h1(class="link") : "Links";
-        ul {
-            @ for object in graph.objects().filter(|o| o.is_link()) {
-                li : object_link(object);
-            }
-        }
-    };
-    wiki_page("Object list", html!{}, content)
-}
-
-fn page_create_atom() -> Response {
-    let content = html! {
-        form(method="post") {
-            : "Value:";
-            input(type="text", name="text");
-            input(type="submit", value="Create");
-        }
-    };
-    wiki_page("Create atom", html!{}, content)
-}
-fn post_create_atom(request: &Request, graph: &mut Graph) -> Response {
-    let form_data = try_or_400!(post_input!(request, { text: String }));
-    let text = form_data.text.trim();
-    let index = graph.use_atom(Atom::text(text));
-    Response::redirect_303(object_url(index))
-}
-
 fn page_create_abstract() -> Response {
     let content = html! {
         form(method="post") {
@@ -238,12 +183,6 @@ fn post_create_link(request: &Request, graph: &mut Graph) -> Response {
     Response::redirect_303(object_url(index))
 }
 
-fn post_edit_description(request: &Request, graph: &mut Graph) -> Response {
-    let mut form_data = try_or_400!(post_input!(request, { index: Index, content: String}));
-    form_data.content.retain(|c| c != '\r');
-    let _ = try_or_400!(graph.set_description(form_data.index, form_data.content));
-    Response::redirect_303(object_url(form_data.index))
-}
 fn post_remove(request: &Request, graph: &mut Graph) -> Response {
     let form_data = try_or_400!(post_input!(request, { index: Index }));
     let _ = try_or_400!(graph.remove_object(form_data.index));

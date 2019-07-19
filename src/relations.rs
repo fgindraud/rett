@@ -183,9 +183,18 @@ impl Database {
     {
         self.index_of_text_atoms.get(text).cloned()
     }
-
     pub fn index_of_relation(&self, relation: &Relation) -> Option<Index> {
         self.index_of_relations.get(relation).cloned()
+    }
+
+    /// Get atom ref if it exists, by name.
+    pub fn get_text_atom<'a, Q>(&'a self, text: &Q) -> Option<Ref<'a, Atom>>
+    where
+        String: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.index_of_text_atom(text)
+            .map(|index| Ref::new(self, index))
     }
 
     /// Iterate on all elements.

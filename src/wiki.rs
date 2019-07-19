@@ -174,10 +174,28 @@ impl EndPoint for Homepage {
         }
     }
     fn generate_response(self, state: &State) -> Response<Body> {
-        let database = &state.database.borrow(); //TODO finish
+        let database = &state.database.borrow();
         let edit_state = &self.edit_state;
         let content = html! {
             h1 : lang::HOMEPAGE;
+            @ if let Some(wiki_homepage) = database.get_text_atom("_wiki_homepage") {
+                ul {
+                    @ for tagged in wiki_homepage.descriptor_of().iter().map(|tag_relation| tag_relation.subject()) {
+                        li {
+                            a(href=DisplayElement::new(tagged.index(), edit_state).url(), class=css_class_name(tagged)) {
+                                : tagged.index();
+                                : " ";
+                                : element_name(tagged);
+                            }
+                        }
+                    }
+                }
+            }
+            form(method="post", action=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="hbox") {
+                p(class="fill_box") : lang::HOMEPAGE_HELP;
+                input(type="submit", value="_wiki_homepage", class="button");
+                input(type="hidden", name="text", value="_wiki_homepage");
+            }
         };
         let page = compose_wiki_page(lang::HOMEPAGE, content, edit_state);
         web::response_html(page)
@@ -230,7 +248,12 @@ impl EndPoint for CreateAtom {
     //TODO implement preview button: fuzzy search current text content and propose similar atoms
     type State = State;
     fn url(&self) -> String {
-        String::from("/create/atom")
+        //FIXME EndPoint trait works great for GET but not for POST...
+        let edit_state = match self {
+            CreateAtom::Get { edit_state } => edit_state,
+            CreateAtom::Post { edit_state, .. } => edit_state,
+        };
+        web::to_path_and_query("/create/atom", edit_state)
     }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
@@ -366,6 +389,8 @@ mod lang {
     pub const PREVIEW_BUTTON: &'static str = "Prévisualiser";
 
     pub const HOMEPAGE: &'static str = "Accueil";
+    pub const HOMEPAGE_HELP: &'static str =
+        "Pour lister un élément sur cette page, il doit être taggé par _wiki_homepage.";
 
     pub const ALL_ELEMENTS_NAV: &'static str = "Éléments";
     pub const ALL_ELEMENTS_TITLE: &'static str = "Liste des éléments";
