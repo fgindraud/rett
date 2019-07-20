@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use horrorshow::{self, Render, RenderOnce, Template};
+use horrorshow::{self, RenderOnce, Template};
 
 use self::web::{remove_prefix, EndPoint, FromRequestError, FromRequestOk};
 use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
@@ -67,18 +67,15 @@ pub fn run(addr: &str, database_file: &Path) {
  * Wiki page definitions.
  */
 
-/* Design:
- *
- * Link creation:
+/* Link creation:
  * buttons to start creating a link from/to a normal display page.
  * cancel + build button if all requirements are filled
- *
- * Abstract creation: Same with optional name field.
  *
  * Removal TODO
  */
 
-#[derive(Clone)]
+// TODO copy for convenience with url generation. should be reworked one day
+#[derive(Clone, Copy)]
 struct EditState {
     // Relation
     subject: Option<Index>,
@@ -106,14 +103,6 @@ struct DisplayElement {
     index: Index,
     edit_state: EditState,
 }
-impl DisplayElement {
-    fn new(index: Index, edit_state: &EditState) -> Self {
-        DisplayElement {
-            index: index,
-            edit_state: edit_state.clone(),
-        }
-    }
-}
 impl EndPoint for DisplayElement {
     type State = State;
     fn url(&self) -> String {
@@ -131,13 +120,13 @@ impl EndPoint for DisplayElement {
     fn generate_response(self, state: &State) -> Response<Body> {
         match state.database.borrow().element(self.index) {
             Ok(element) => {
-                web::response_html(display_element_page_content(element, &self.edit_state))
+                web::response_html(display_element_page_content(element, self.edit_state))
             }
             Err(_) => web::response_empty_404(),
         }
     }
 }
-fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -> String {
+fn display_element_page_content(element: Ref<Element>, edit_state: EditState) -> String {
     let _nav = html! {};
     let name = element_name(element);
     let content = html! {
@@ -154,7 +143,8 @@ fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -
             }
         }
     };
-    compose_wiki_page(&name, content, edit_state)
+    let nav = navigation_links(edit_state, Some(element.index()));
+    compose_wiki_page(&name, content, nav)
 }
 
 /// Homepage : links to selected elements.
@@ -176,14 +166,14 @@ impl EndPoint for Homepage {
     }
     fn generate_response(self, state: &State) -> Response<Body> {
         let database = &state.database.borrow();
-        let edit_state = &self.edit_state;
+        let edit_state = self.edit_state;
         let content = html! {
             h1 : lang::HOMEPAGE;
             @ if let Some(wiki_homepage) = database.get_text_atom("_wiki_homepage") {
                 ul {
                     @ for tagged in wiki_homepage.descriptor_of().iter().map(|tag_relation| tag_relation.subject()) {
                         li {
-                            a(href=DisplayElement::new(tagged.index(), edit_state).url(), class=css_class_name(tagged)) {
+                            a(href=DisplayElement{ index: tagged.index(), edit_state }.url(), class=css_class_name(tagged)) {
                                 : tagged.index();
                                 : " ";
                                 : element_name(tagged);
@@ -192,13 +182,14 @@ impl EndPoint for Homepage {
                     }
                 }
             }
-            form(method="post", action=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="hbox") {
+            form(method="post", action=CreateAtom::Get{ edit_state }.url(), class="hbox") {
                 p(class="fill_box") : lang::HOMEPAGE_HELP;
                 button(type="submit") : "_wiki_homepage";
                 input(type="hidden", name="text", value="_wiki_homepage");
             }
         };
-        let page = compose_wiki_page(lang::HOMEPAGE, content, edit_state);
+        let nav = navigation_links(self.edit_state, None);
+        let page = compose_wiki_page(lang::HOMEPAGE, content, nav);
         web::response_html(page)
     }
 }
@@ -222,12 +213,12 @@ impl EndPoint for ListAllElements {
     }
     fn generate_response(self, state: &State) -> Response<Body> {
         let database = &state.database.borrow();
-        let edit_state = &self.edit_state;
+        let edit_state = self.edit_state;
         let content = html! {
             h1 : lang::ALL_ELEMENTS_TITLE;
             @ for element in database.iter() {
                 p {
-                    a(href=DisplayElement::new(element.index(), edit_state).url(), class=css_class_name(element)) {
+                    a(href=DisplayElement{ index: element.index(), edit_state }.url(), class=css_class_name(element)) {
                         : element.index();
                         : " ";
                         : element_name(element);
@@ -235,7 +226,8 @@ impl EndPoint for ListAllElements {
                 }
             }
         };
-        let page = compose_wiki_page(lang::ALL_ELEMENTS_TITLE, content, edit_state);
+        let nav = navigation_links(edit_state, None);
+        let page = compose_wiki_page(lang::ALL_ELEMENTS_TITLE, content, nav);
         web::response_html(page)
     }
 }
@@ -285,7 +277,8 @@ impl EndPoint for CreateAtom {
                         }
                     }
                 };
-                let page = compose_wiki_page(lang::CREATE_ATOM_TITLE, content, &edit_state);
+                let nav = navigation_links(edit_state, None);
+                let page = compose_wiki_page(lang::CREATE_ATOM_TITLE, content, nav);
                 web::response_html(page)
             }
             CreateAtom::Post { text, edit_state } => {
@@ -348,7 +341,8 @@ impl EndPoint for CreateAbstract {
                         }
                     }
                 };
-                let page = compose_wiki_page(lang::CREATE_ABSTRACT_TITLE, content, &edit_state);
+                let nav = navigation_links(edit_state, None);
+                let page = compose_wiki_page(lang::CREATE_ABSTRACT_TITLE, content, nav);
                 web::response_html(page)
             }
             CreateAbstract::Post { name, edit_state } => {
@@ -371,9 +365,9 @@ impl EndPoint for CreateAbstract {
 }
 
 //FIXME text use lang
-fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: &'a EditState) -> impl Render + 'a {
+fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: EditState) -> impl RenderOnce + 'a {
     owned_html! {
-        a(href=DisplayElement::new(relation.index(),edit_state).url(), class="relation") : format!("Element {}", relation.index());
+        a(href=DisplayElement{ index: relation.index(), edit_state }.url(), class="relation") : format!("Element {}", relation.index());
     }
 }
 fn element_name(element: Ref<Element>) -> String {
@@ -416,11 +410,21 @@ fn css_class_name(element: Ref<Element>) -> &'static str {
     }
 }
 
+fn navigation_links<'a>(edit_state: EditState, current_element: Option<Index>) -> impl RenderOnce {
+    owned_html! {
+        a(href=Homepage{ edit_state }.url()) : lang::HOMEPAGE;
+        a(href=ListAllElements{ edit_state }.url()) : lang::ALL_ELEMENTS_NAV;
+        a(href=CreateAtom::Get{ edit_state }.url(), class="atom") : lang::CREATE_ATOM_NAV;
+        a(href=CreateAbstract::Get{ edit_state }.url(), class="abstract") : lang::CREATE_ABSTRACT_NAV;
+    }
+}
+
 /// Generated wiki page final assembly. Adds the navigation bar, overall html structure.
-fn compose_wiki_page<T, C>(title: T, content: C, edit_state: &EditState) -> String
+fn compose_wiki_page<T, C, N>(title: T, content: C, navigation_links: N) -> String
 where
     T: RenderOnce,
     C: RenderOnce,
+    N: RenderOnce,
 {
     let template = html! {
         : horrorshow::helper::doctype::HTML;
@@ -432,16 +436,8 @@ where
                 title : title;
             }
             body {
-                nav {
-                    a(href=Homepage{edit_state: edit_state.clone()}.url()) : lang::HOMEPAGE;
-                    a(href=ListAllElements{edit_state: edit_state.clone()}.url()) : lang::ALL_ELEMENTS_NAV;
-                    a(href=CreateAtom::Get{edit_state: edit_state.clone()}.url(), class="atom") : lang::CREATE_ATOM_NAV;
-                    a(href=CreateAbstract::Get{edit_state: edit_state.clone()}.url(), class="abstract") : lang::CREATE_ABSTRACT_NAV;
-                    // TODO other, buttons for relation edition (select (sub, desc, comp) + create)
-                }
-                main {
-                    : content;
-                }
+                nav : navigation_links;
+                main : content;
                 script(src=StaticAsset::from("client.js").url()) {}
             }
         }
