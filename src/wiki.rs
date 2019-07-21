@@ -75,7 +75,7 @@ pub fn run(addr: &str, database_file: &Path) {
  */
 
 // TODO copy for convenience with url generation. should be reworked one day
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct EditState {
     // Relation
     subject: Option<Index>,
@@ -103,11 +103,13 @@ struct DisplayElement {
     index: Index,
     edit_state: EditState,
 }
+impl DisplayElement {
+    fn url(index: Index, edit_state: &EditState) -> String {
+        web::to_path_and_query(format!("/element/{}", index), edit_state)
+    }
+}
 impl EndPoint for DisplayElement {
     type State = State;
-    fn url(&self) -> String {
-        web::to_path_and_query(format!("/element/{}", self.index), &self.edit_state)
-    }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => Ok(FromRequestOk::Value(DisplayElement {
@@ -120,13 +122,13 @@ impl EndPoint for DisplayElement {
     fn generate_response(self, state: &State) -> Response<Body> {
         match state.database.borrow().element(self.index) {
             Ok(element) => {
-                web::response_html(display_element_page_content(element, self.edit_state))
+                web::response_html(display_element_page_content(element, &self.edit_state))
             }
             Err(_) => web::response_empty_404(),
         }
     }
 }
-fn display_element_page_content(element: Ref<Element>, edit_state: EditState) -> String {
+fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -> String {
     let _nav = html! {};
     let name = element_name(element);
     let content = html! {
@@ -151,11 +153,13 @@ fn display_element_page_content(element: Ref<Element>, edit_state: EditState) ->
 struct Homepage {
     edit_state: EditState,
 }
+impl Homepage {
+    fn url(edit_state: &EditState) -> String {
+        web::to_path_and_query("/", edit_state)
+    }
+}
 impl EndPoint for Homepage {
     type State = State;
-    fn url(&self) -> String {
-        web::to_path_and_query("/", &self.edit_state)
-    }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/") => Ok(FromRequestOk::Value(Homepage {
@@ -166,14 +170,13 @@ impl EndPoint for Homepage {
     }
     fn generate_response(self, state: &State) -> Response<Body> {
         let database = &state.database.borrow();
-        let edit_state = self.edit_state;
         let content = html! {
             h1 : lang::HOMEPAGE;
             @ if let Some(wiki_homepage) = database.get_text_atom("_wiki_homepage") {
                 ul {
                     @ for tagged in wiki_homepage.descriptor_of().iter().map(|tag_relation| tag_relation.subject()) {
                         li {
-                            a(href=DisplayElement{ index: tagged.index(), edit_state }.url(), class=css_class_name(tagged)) {
+                            a(href=DisplayElement::url(tagged.index(), &self.edit_state), class=css_class_name(tagged)) {
                                 : tagged.index();
                                 : " ";
                                 : element_name(tagged);
@@ -182,13 +185,13 @@ impl EndPoint for Homepage {
                     }
                 }
             }
-            form(method="post", action=CreateAtom::Get{ edit_state }.url(), class="hbox") {
+            form(method="post", action=CreateAtom::url(&self.edit_state), class="hbox") {
                 p(class="fill_box") : lang::HOMEPAGE_HELP;
                 button(type="submit") : "_wiki_homepage";
                 input(type="hidden", name="text", value="_wiki_homepage");
             }
         };
-        let nav = navigation_links(self.edit_state, None);
+        let nav = navigation_links(&self.edit_state, None);
         let page = compose_wiki_page(lang::HOMEPAGE, content, nav);
         web::response_html(page)
     }
@@ -198,11 +201,13 @@ impl EndPoint for Homepage {
 struct ListAllElements {
     edit_state: EditState,
 }
+impl ListAllElements {
+    fn url(edit_state: &EditState) -> String {
+        web::to_path_and_query("/all", edit_state)
+    }
+}
 impl EndPoint for ListAllElements {
     type State = State;
-    fn url(&self) -> String {
-        web::to_path_and_query("/all", &self.edit_state)
-    }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/all") => Ok(FromRequestOk::Value(ListAllElements {
@@ -213,12 +218,11 @@ impl EndPoint for ListAllElements {
     }
     fn generate_response(self, state: &State) -> Response<Body> {
         let database = &state.database.borrow();
-        let edit_state = self.edit_state;
         let content = html! {
             h1 : lang::ALL_ELEMENTS_TITLE;
             @ for element in database.iter() {
                 p {
-                    a(href=DisplayElement{ index: element.index(), edit_state }.url(), class=css_class_name(element)) {
+                    a(href=DisplayElement::url(element.index(), &self.edit_state), class=css_class_name(element)) {
                         : element.index();
                         : " ";
                         : element_name(element);
@@ -226,7 +230,7 @@ impl EndPoint for ListAllElements {
                 }
             }
         };
-        let nav = navigation_links(edit_state, None);
+        let nav = navigation_links(&self.edit_state, None);
         let page = compose_wiki_page(lang::ALL_ELEMENTS_TITLE, content, nav);
         web::response_html(page)
     }
@@ -237,17 +241,14 @@ enum CreateAtom {
     Get { edit_state: EditState },
     Post { text: String, edit_state: EditState },
 }
+impl CreateAtom {
+    fn url(edit_state: &EditState) -> String {
+        web::to_path_and_query("/create/atom", edit_state)
+    }
+}
 impl EndPoint for CreateAtom {
     //TODO implement preview button: fuzzy search current text content and propose similar atoms
     type State = State;
-    fn url(&self) -> String {
-        //FIXME EndPoint trait works great for GET but not for POST...
-        let edit_state = match self {
-            CreateAtom::Get { edit_state } => edit_state,
-            CreateAtom::Post { edit_state, .. } => edit_state,
-        };
-        web::to_path_and_query("/create/atom", edit_state)
-    }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/create/atom") => Ok(FromRequestOk::Value(CreateAtom::Get {
@@ -269,7 +270,7 @@ impl EndPoint for CreateAtom {
             CreateAtom::Get { edit_state } => {
                 let content = html! {
                     h1(class="atom") : lang::CREATE_ATOM_TITLE;
-                    form(method="post", class="vbox") {
+                    form(method="post", action=CreateAtom::url(&edit_state), class="vbox") {
                         input(type="text", name="text", required, placeholder=lang::ATOM_TEXT);
                         div(class="hbox") {
                             button(type="submit", name="preview") : lang::PREVIEW_BUTTON;
@@ -277,14 +278,13 @@ impl EndPoint for CreateAtom {
                         }
                     }
                 };
-                let nav = navigation_links(edit_state, None);
+                let nav = navigation_links(&edit_state, None);
                 let page = compose_wiki_page(lang::CREATE_ATOM_TITLE, content, nav);
                 web::response_html(page)
             }
             CreateAtom::Post { text, edit_state } => {
                 let index = state.database.borrow_mut().insert_atom(Atom::from(text));
-                let uri = DisplayElement { index, edit_state }.url();
-                web::response_redirection(&uri)
+                web::response_redirection(&DisplayElement::url(index, &edit_state))
             }
         }
     }
@@ -300,15 +300,13 @@ enum CreateAbstract {
         edit_state: EditState,
     },
 }
-impl EndPoint for CreateAbstract {
-    type State = State;
-    fn url(&self) -> String {
-        let edit_state = match self {
-            CreateAbstract::Get { edit_state } => edit_state,
-            CreateAbstract::Post { edit_state, .. } => edit_state,
-        };
+impl CreateAbstract {
+    fn url(edit_state: &EditState) -> String {
         web::to_path_and_query("/create/abstract", edit_state)
     }
+}
+impl EndPoint for CreateAbstract {
+    type State = State;
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
             (&Method::GET, "/create/abstract") => Ok(FromRequestOk::Value(CreateAbstract::Get {
@@ -333,7 +331,7 @@ impl EndPoint for CreateAbstract {
             CreateAbstract::Get { edit_state } => {
                 let content = html! {
                     h1(class="atom") : lang::CREATE_ABSTRACT_TITLE;
-                    form(method="post", class="vbox") {
+                    form(method="post", action=CreateAbstract::url(&edit_state), class="vbox") {
                         input(type="text", name="name", placeholder=lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
                         div(class="hbox") {
                             button(type="submit", name="preview") : lang::PREVIEW_BUTTON;
@@ -341,7 +339,7 @@ impl EndPoint for CreateAbstract {
                         }
                     }
                 };
-                let nav = navigation_links(edit_state, None);
+                let nav = navigation_links(&edit_state, None);
                 let page = compose_wiki_page(lang::CREATE_ABSTRACT_TITLE, content, nav);
                 web::response_html(page)
             }
@@ -357,17 +355,19 @@ impl EndPoint for CreateAbstract {
                         complement: Some(name_element),
                     });
                 }
-                let uri = DisplayElement { index, edit_state }.url();
-                web::response_redirection(&uri)
+                web::response_redirection(&DisplayElement::url(index, &edit_state))
             }
         }
     }
 }
 
 //FIXME text use lang
-fn relation_link<'a>(relation: Ref<'a, Relation>, edit_state: EditState) -> impl RenderOnce + 'a {
+fn relation_link<'a>(
+    relation: Ref<'a, Relation>,
+    edit_state: &'a EditState,
+) -> impl RenderOnce + 'a {
     owned_html! {
-        a(href=DisplayElement{ index: relation.index(), edit_state }.url(), class="relation") : format!("Element {}", relation.index());
+        a(href=DisplayElement::url(relation.index(), edit_state), class="relation") : format!("Element {}", relation.index());
     }
 }
 fn element_name(element: Ref<Element>) -> String {
@@ -410,12 +410,15 @@ fn css_class_name(element: Ref<Element>) -> &'static str {
     }
 }
 
-fn navigation_links<'a>(edit_state: EditState, current_element: Option<Index>) -> impl RenderOnce {
+fn navigation_links<'a>(
+    edit_state: &'a EditState,
+    current_element: Option<Index>,
+) -> impl RenderOnce + 'a {
     owned_html! {
-        a(href=Homepage{ edit_state }.url()) : lang::HOMEPAGE;
-        a(href=ListAllElements{ edit_state }.url()) : lang::ALL_ELEMENTS_NAV;
-        a(href=CreateAtom::Get{ edit_state }.url(), class="atom") : lang::CREATE_ATOM_NAV;
-        a(href=CreateAbstract::Get{ edit_state }.url(), class="abstract") : lang::CREATE_ABSTRACT_NAV;
+        a(href=Homepage::url(edit_state)) : lang::HOMEPAGE;
+        a(href=ListAllElements::url(edit_state)) : lang::ALL_ELEMENTS_NAV;
+        a(href=CreateAtom::url(edit_state), class="atom") : lang::CREATE_ATOM_NAV;
+        a(href=CreateAbstract::url(edit_state), class="abstract") : lang::CREATE_ABSTRACT_NAV;
     }
 }
 
@@ -431,14 +434,14 @@ where
         html {
             head {
                 meta(charset="UTF-8");
-                link(rel="stylesheet", type="text/css", href=StaticAsset::from("style.css").url());
+                link(rel="stylesheet", type="text/css", href=StaticAsset::url("style.css"));
                 meta(name="viewport", content="width=device-width, initial-scale=1.0");
                 title : title;
             }
             body {
                 nav : navigation_links;
                 main : content;
-                script(src=StaticAsset::from("client.js").url()) {}
+                script(src=StaticAsset::url("client.js")) {}
             }
         }
     };
@@ -481,19 +484,18 @@ mod lang {
 struct StaticAsset {
     path: String,
 }
-impl<T: Into<String>> From<T> for StaticAsset {
-    fn from(v: T) -> Self {
-        StaticAsset { path: v.into() }
+impl StaticAsset {
+    fn url(path: &str) -> String {
+        format!("/static/{}", path)
     }
 }
 impl EndPoint for StaticAsset {
     type State = State;
-    fn url(&self) -> String {
-        format!("/static/{}", self.path)
-    }
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/static/")) {
-            (&Method::GET, Some(path)) => Ok(FromRequestOk::Value(StaticAsset::from(path))),
+            (&Method::GET, Some(path)) => Ok(FromRequestOk::Value(StaticAsset {
+                path: path.to_string(),
+            })),
             _ => Err(FromRequestError::NoMatch(r)),
         }
     }
@@ -577,7 +579,7 @@ mod web {
     /// Interface for an URL endpoint.
     pub trait EndPoint: Sized {
         type State: ?Sized;
-        fn url(&self) -> String;
+        //TODO reintroduce if useful: fn url(&self) -> String;
         fn from_request(request: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError>;
         fn generate_response(self, state: &Self::State) -> Response<Body>;
     }
