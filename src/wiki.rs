@@ -82,6 +82,11 @@ struct EditState {
     descriptor: Option<Index>,
     complement: Option<Index>,
 }
+impl EditState {
+    fn with_subject(&self, subject: Option<Index>) -> Self {
+        EditState { subject, ..*self }
+    }
+}
 impl web::QueryFormat for EditState {
     fn to_query(&self, builder: &mut web::PathQueryBuilder) {
         builder.optional_entry("subject", self.subject);
@@ -412,13 +417,34 @@ fn css_class_name(element: Ref<Element>) -> &'static str {
 
 fn navigation_links<'a>(
     edit_state: &'a EditState,
-    current_element: Option<Index>,
+    displayed: Option<Index>,
 ) -> impl RenderOnce + 'a {
     owned_html! {
         a(href=Homepage::url(edit_state)) : lang::HOMEPAGE;
         a(href=ListAllElements::url(edit_state)) : lang::ALL_ELEMENTS_NAV;
         a(href=CreateAtom::url(edit_state), class="atom") : lang::CREATE_ATOM_NAV;
         a(href=CreateAbstract::url(edit_state), class="abstract") : lang::CREATE_ABSTRACT_NAV;
+        |tmpl| match (edit_state.subject, displayed) {
+            (None, None) => (),
+            (None, Some(displayed)) => {
+                tmpl << html! {
+                    a(href=DisplayElement::url(displayed, &edit_state.with_subject(Some(displayed))), class="relation")
+                    : format!("+ {}", lang::RELATION_SUBJECT);
+                }
+            }
+            (Some(selected), Some(displayed)) if selected == displayed => {
+                tmpl << html! {
+                    a(href=DisplayElement::url(displayed, &edit_state.with_subject(None)), class="relation")
+                    : format!("- {}: {}", lang::RELATION_SUBJECT, displayed);
+                }
+            },
+            (Some(selected), _) => {
+                tmpl << html! {
+                    a(href=DisplayElement::url(selected, edit_state), class="relation")
+                    : format!("{}: {}", lang::RELATION_SUBJECT, selected);
+                }
+            }
+        };
     }
 }
 
@@ -469,6 +495,8 @@ mod lang {
     pub const CREATE_ABSTRACT_NAV: &'static str = "Abstrait...";
     pub const CREATE_ABSTRACT_TITLE: &'static str = "Ajouter un élément abstrait...";
     pub const CREATE_ABSTRACT_NAME_PLACEHOLDER: &'static str = "Nom optionel";
+
+    pub const RELATION_SUBJECT: &'static str = "Sujet";
 
     pub const NAMED_ATOM: &'static str = "est nommé";
 }
