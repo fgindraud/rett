@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use horrorshow::{self, RenderOnce, Template};
+use horrorshow::{self, RenderOnce, Template, TemplateBuffer};
 
 use self::web::{remove_prefix, EndPoint, FromRequestError, FromRequestOk};
 use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
@@ -81,11 +81,6 @@ struct EditState {
     subject: Option<Index>,
     descriptor: Option<Index>,
     complement: Option<Index>,
-}
-impl EditState {
-    fn with_subject(&self, subject: Option<Index>) -> Self {
-        EditState { subject, ..*self }
-    }
 }
 impl web::QueryFormat for EditState {
     fn to_query(&self, builder: &mut web::PathQueryBuilder) {
@@ -415,6 +410,36 @@ fn css_class_name(element: Ref<Element>) -> &'static str {
     }
 }
 
+/******************************************************************************
+ * Language and utils.
+ */
+mod lang {
+    pub const COMMIT_BUTTON: &'static str = "Valider";
+    pub const PREVIEW_BUTTON: &'static str = "Prévisualiser";
+
+    pub const HOMEPAGE: &'static str = "Accueil";
+    pub const HOMEPAGE_HELP: &'static str =
+        "Pour lister un élément sur cette page, il doit être taggé par _wiki_homepage.";
+
+    pub const ALL_ELEMENTS_NAV: &'static str = "Éléments";
+    pub const ALL_ELEMENTS_TITLE: &'static str = "Liste des éléments";
+
+    pub const CREATE_ATOM_NAV: &'static str = "Atome...";
+    pub const CREATE_ATOM_TITLE: &'static str = "Ajouter un atome...";
+    pub const ATOM_TEXT: &'static str = "Texte";
+
+    pub const CREATE_ABSTRACT_NAV: &'static str = "Abstrait...";
+    pub const CREATE_ABSTRACT_TITLE: &'static str = "Ajouter un élément abstrait...";
+    pub const CREATE_ABSTRACT_NAME_PLACEHOLDER: &'static str = "Nom optionel";
+
+    pub const RELATION_SUBJECT: &'static str = "Sujet";
+    pub const RELATION_DESCRIPTOR: &'static str = "Verbe";
+    pub const RELATION_COMPLEMENT: &'static str = "Objet";
+
+    pub const NAMED_ATOM: &'static str = "est nommé";
+}
+
+/// Generates sequence of navigation links depending on state.
 fn navigation_links<'a>(
     edit_state: &'a EditState,
     displayed: Option<Index>,
@@ -424,27 +449,39 @@ fn navigation_links<'a>(
         a(href=ListAllElements::url(edit_state)) : lang::ALL_ELEMENTS_NAV;
         a(href=CreateAtom::url(edit_state), class="atom") : lang::CREATE_ATOM_NAV;
         a(href=CreateAbstract::url(edit_state), class="abstract") : lang::CREATE_ABSTRACT_NAV;
-        |tmpl| match (edit_state.subject, displayed) {
-            (None, None) => (),
-            (None, Some(displayed)) => {
-                tmpl << html! {
-                    a(href=DisplayElement::url(displayed, &edit_state.with_subject(Some(displayed))), class="relation")
-                    : format!("+ {}", lang::RELATION_SUBJECT);
-                }
+        |tmpl| relation_selection_nav_link(tmpl, lang::RELATION_SUBJECT, displayed, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e });
+        |tmpl| relation_selection_nav_link(tmpl, lang::RELATION_DESCRIPTOR, displayed, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e });
+        |tmpl| relation_selection_nav_link(tmpl, lang::RELATION_COMPLEMENT, displayed, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e });
+    }
+}
+fn relation_selection_nav_link<IFV, WFV>(
+    tmpl: &mut TemplateBuffer,
+    field_text: &str,
+    displayed: Option<Index>,
+    edit_state: &EditState,
+    init_field_value: IFV,
+    with_field_value: WFV,
+) where
+    IFV: FnOnce(&EditState) -> Option<Index>,
+    WFV: FnOnce(&EditState, Option<Index>) -> EditState,
+{
+    match (init_field_value(edit_state), displayed) {
+        (None, None) => (),
+        (None, Some(displayed)) => {
+            tmpl << html! {
+                a(href=DisplayElement::url(displayed, &with_field_value(edit_state, Some(displayed))), class="relation") : format!("+ {}", field_text);
             }
-            (Some(selected), Some(displayed)) if selected == displayed => {
-                tmpl << html! {
-                    a(href=DisplayElement::url(displayed, &edit_state.with_subject(None)), class="relation")
-                    : format!("- {}: {}", lang::RELATION_SUBJECT, displayed);
-                }
-            },
-            (Some(selected), _) => {
-                tmpl << html! {
-                    a(href=DisplayElement::url(selected, edit_state), class="relation")
-                    : format!("{}: {}", lang::RELATION_SUBJECT, selected);
-                }
+        }
+        (Some(selected), Some(displayed)) if selected == displayed => {
+            tmpl << html! {
+                a(href=DisplayElement::url(displayed, &with_field_value(edit_state, None)), class="relation") : format!("- {}: {}", field_text, displayed);
             }
-        };
+        }
+        (Some(selected), _) => {
+            tmpl << html! {
+                a(href=DisplayElement::url(selected, edit_state), class="relation") : format!("{}: {}", field_text, selected);
+            }
+        }
     }
 }
 
@@ -472,33 +509,6 @@ where
         }
     };
     template.into_string().unwrap()
-}
-
-/******************************************************************************
- * Language.
- */
-mod lang {
-    pub const COMMIT_BUTTON: &'static str = "Valider";
-    pub const PREVIEW_BUTTON: &'static str = "Prévisualiser";
-
-    pub const HOMEPAGE: &'static str = "Accueil";
-    pub const HOMEPAGE_HELP: &'static str =
-        "Pour lister un élément sur cette page, il doit être taggé par _wiki_homepage.";
-
-    pub const ALL_ELEMENTS_NAV: &'static str = "Éléments";
-    pub const ALL_ELEMENTS_TITLE: &'static str = "Liste des éléments";
-
-    pub const CREATE_ATOM_NAV: &'static str = "Atome...";
-    pub const CREATE_ATOM_TITLE: &'static str = "Ajouter un atome...";
-    pub const ATOM_TEXT: &'static str = "Texte";
-
-    pub const CREATE_ABSTRACT_NAV: &'static str = "Abstrait...";
-    pub const CREATE_ABSTRACT_TITLE: &'static str = "Ajouter un élément abstrait...";
-    pub const CREATE_ABSTRACT_NAME_PLACEHOLDER: &'static str = "Nom optionel";
-
-    pub const RELATION_SUBJECT: &'static str = "Sujet";
-
-    pub const NAMED_ATOM: &'static str = "est nommé";
 }
 
 /******************************************************************************
