@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use horrorshow::{self, RenderOnce, Template, TemplateBuffer};
+use maud::{html, Markup, PreEscaped};
 
 use self::web::{remove_prefix, EndPoint, FromRequestError, FromRequestOk};
 use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
@@ -129,24 +129,23 @@ impl EndPoint for DisplayElement {
     }
 }
 fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -> String {
-    let _nav = html! {};
-    let name = element_name(element);
+    let name = html! { (element_name(element)) };
     let content = html! {
-        h1(class=css_class_name(element)) : &name;
+        h1 class=(css_class_name(element)) { (name) }
         ul {
             @ for relation in element.subject_of().iter() {
-                li : relation_link(relation, edit_state);
+                li { (relation_link(relation, edit_state)) }
             }
             @ for relation in element.descriptor_of().iter() {
-                li : relation_link(relation, edit_state);
+                li { (relation_link(relation, edit_state)) }
             }
             @ for relation in element.complement_of().iter() {
-                li : relation_link(relation, edit_state);
+                li { (relation_link(relation, edit_state)) }
             }
         }
     };
     let nav = navigation_links(edit_state, Some(element.index()));
-    compose_wiki_page(&name, content, nav)
+    compose_wiki_page(name, content, nav)
 }
 
 /// Homepage : links to selected elements.
@@ -171,24 +170,22 @@ impl EndPoint for Homepage {
     fn generate_response(self, state: &State) -> Response<Body> {
         let database = &state.database.borrow();
         let content = html! {
-            h1 : lang::HOMEPAGE;
+            h1 { (lang::HOMEPAGE) }
             @ if let Some(wiki_homepage) = database.get_text_atom("_wiki_homepage") {
                 ul {
                     @ for tagged in wiki_homepage.descriptor_of().iter().map(|tag_relation| tag_relation.subject()) {
                         li {
-                            a(href=DisplayElement::url(tagged.index(), &self.edit_state), class=css_class_name(tagged)) {
-                                : tagged.index();
-                                : " ";
-                                : element_name(tagged);
+                            a href=(DisplayElement::url(tagged.index(), &self.edit_state)) class=(css_class_name(tagged)) {
+                                (tagged.index()) " " (element_name(tagged))
                             }
                         }
                     }
                 }
             }
-            form(method="post", action=CreateAtom::url(&self.edit_state), class="hbox") {
-                label(for="wiki_homepage") : lang::HOMEPAGE_HELP;
-                button(id="wiki_homepage") : "_wiki_homepage";
-                input(type="hidden", name="text", value="_wiki_homepage");
+            form method="post" action=(CreateAtom::url(&self.edit_state)) class="hbox" {
+                label for="wiki_homepage" { (lang::HOMEPAGE_HELP) }
+                button id="wiki_homepage" { "_wiki_homepage" }
+                input type="hidden" name="text" value="_wiki_homepage";
             }
         };
         let nav = navigation_links(&self.edit_state, None);
@@ -219,13 +216,11 @@ impl EndPoint for ListAllElements {
     fn generate_response(self, state: &State) -> Response<Body> {
         let database = &state.database.borrow();
         let content = html! {
-            h1 : lang::ALL_ELEMENTS_TITLE;
+            h1 { (lang::ALL_ELEMENTS_TITLE) }
             @ for element in database.iter() {
                 p {
-                    a(href=DisplayElement::url(element.index(), &self.edit_state), class=css_class_name(element)) {
-                        : element.index();
-                        : " ";
-                        : element_name(element);
+                    a href=(DisplayElement::url(element.index(), &self.edit_state)) class=(css_class_name(element)) {
+                        (element.index()) " " (element_name(element))
                     }
                 }
             }
@@ -269,12 +264,12 @@ impl EndPoint for CreateAtom {
         match self {
             CreateAtom::Get { edit_state } => {
                 let content = html! {
-                    h1(class="atom") : lang::CREATE_ATOM_TITLE;
-                    form(method="post", action=CreateAtom::url(&edit_state), class="vbox") {
-                        input(type="text", name="text", required, placeholder=lang::ATOM_TEXT);
-                        div(class="hbox") {
-                            button(name="preview", formmethod="get") : lang::PREVIEW_BUTTON;
-                            button(name="create") : lang::COMMIT_BUTTON;
+                    h1 class="atom" { (lang::CREATE_ATOM_TITLE) }
+                    form method="post" action=(CreateAtom::url(&edit_state)) class="vbox" {
+                        input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
+                        div class="hbox" {
+                            button formmethod="get" { (lang::PREVIEW_BUTTON) }
+                            button { (lang::COMMIT_BUTTON) }
                         }
                     }
                 };
@@ -330,12 +325,12 @@ impl EndPoint for CreateAbstract {
         match self {
             CreateAbstract::Get { edit_state } => {
                 let content = html! {
-                    h1(class="abstract") : lang::CREATE_ABSTRACT_TITLE;
-                    form(method="post", action=CreateAbstract::url(&edit_state), class="vbox") {
-                        input(type="text", name="name", placeholder=lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
-                        div(class="hbox") {
-                            button(name="preview", formmethod="get") : lang::PREVIEW_BUTTON;
-                            button(name="create") : lang::COMMIT_BUTTON;
+                    h1 class="abstract" { (lang::CREATE_ABSTRACT_TITLE) }
+                    form method="post" action=(CreateAbstract::url(&edit_state)) class="vbox" {
+                        input type="text" name="name" placeholder=(lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
+                        div class="hbox" {
+                            button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
+                            button { (lang::COMMIT_BUTTON) }
                         }
                     }
                 };
@@ -404,28 +399,32 @@ impl EndPoint for CreateRelation {
                     },
                 };
                 let content = html! {
-                    h1(class="relation") : lang::CREATE_RELATION_TITLE;
-                    form(method="post", action=CreateRelation::url(None), class="vbox") {
+                    h1 class="relation" { (lang::CREATE_RELATION_TITLE) }
+                    form method="post" action=(CreateRelation::url(None)) class="vbox" {
                         table {
                             tr {
-                                td : lang::RELATION_SUBJECT;
-                                td : field_preview_text(edit_state.subject);
+                                td { (lang::RELATION_SUBJECT) }
+                                td { (field_preview_text(edit_state.subject)) }
                             }
                             tr {
-                                td : lang::RELATION_DESCRIPTOR;
-                                td : field_preview_text(edit_state.descriptor);
+                                td { (lang::RELATION_DESCRIPTOR) }
+                                td { (field_preview_text(edit_state.descriptor)) }
                             }
                             tr {
-                                td : lang::RELATION_COMPLEMENT;
-                                td : field_preview_text(edit_state.complement);
+                                td { (lang::RELATION_COMPLEMENT) }
+                                td { (field_preview_text(edit_state.complement)) }
                             }
                         }
-                        input(type="hidden", name="subject", value=edit_state.subject);
-                        input(type="hidden", name="descriptor", value=edit_state.descriptor);
+                        @if let Some(subject) = edit_state.subject {
+                            input type="hidden"  name="subject" value=(subject);
+                        }
+                        @if let Some(descriptor) = edit_state.descriptor {
+                            input type="hidden" name="descriptor" value=(descriptor);
+                        }
                         @if let Some(complement) = edit_state.complement {
-                            input(type="hidden", name="complement", value=complement);
+                            input type="hidden" name="complement" value=(complement);
                         }
-                        button : lang::COMMIT_BUTTON;
+                        button { (lang::COMMIT_BUTTON) }
                     }
                 };
                 let nav = navigation_links(&edit_state, None);
@@ -450,12 +449,11 @@ impl EndPoint for CreateRelation {
 }
 
 //FIXME text use lang
-fn relation_link<'a>(
-    relation: Ref<'a, Relation>,
-    edit_state: &'a EditState,
-) -> impl RenderOnce + 'a {
-    owned_html! {
-        a(href=DisplayElement::url(relation.index(), edit_state), class="relation") : format!("Element {}", relation.index());
+fn relation_link(relation: Ref<Relation>, edit_state: &EditState) -> Markup {
+    html! {
+        a href=(DisplayElement::url(relation.index(), edit_state)) class="relation" {
+            "Element " (relation.index())
+        }
     }
 }
 fn element_name(element: Ref<Element>) -> String {
@@ -502,104 +500,105 @@ fn css_class_name(element: Ref<Element>) -> &'static str {
  * Language and utils.
  */
 mod lang {
-    pub const COMMIT_BUTTON: &'static str = "Valider";
-    pub const PREVIEW_BUTTON: &'static str = "Prévisualiser";
+    use maud::PreEscaped;
+    type ConstStr = PreEscaped<&'static str>;
 
-    pub const HOMEPAGE: &'static str = "Accueil";
-    pub const HOMEPAGE_HELP: &'static str =
-        "Pour lister un élément sur cette page, il doit être taggé par _wiki_homepage.";
+    pub const COMMIT_BUTTON: ConstStr = PreEscaped("Valider");
+    pub const PREVIEW_BUTTON: ConstStr = PreEscaped("Prévisualiser");
 
-    pub const ALL_ELEMENTS_NAV: &'static str = "Éléments";
-    pub const ALL_ELEMENTS_TITLE: &'static str = "Liste des éléments";
+    pub const HOMEPAGE: ConstStr = PreEscaped("Accueil");
+    pub const HOMEPAGE_HELP: ConstStr =
+        PreEscaped("Pour lister un élément sur cette page, il doit être taggé par _wiki_homepage.");
 
-    pub const CREATE_ATOM_NAV: &'static str = "Atome...";
-    pub const CREATE_ATOM_TITLE: &'static str = "Ajouter un atome...";
-    pub const ATOM_TEXT: &'static str = "Texte";
+    pub const ALL_ELEMENTS_NAV: ConstStr = PreEscaped("Éléments");
+    pub const ALL_ELEMENTS_TITLE: ConstStr = PreEscaped("Liste des éléments");
 
-    pub const CREATE_ABSTRACT_NAV: &'static str = "Abstrait...";
-    pub const CREATE_ABSTRACT_TITLE: &'static str = "Ajouter un élément abstrait...";
-    pub const CREATE_ABSTRACT_NAME_PLACEHOLDER: &'static str = "Nom optionel";
+    pub const CREATE_ATOM_NAV: ConstStr = PreEscaped("Atome...");
+    pub const CREATE_ATOM_TITLE: ConstStr = PreEscaped("Ajouter un atome...");
+    pub const ATOM_TEXT: ConstStr = PreEscaped("Texte");
 
-    pub const RELATION_SUBJECT: &'static str = "Sujet";
-    pub const RELATION_DESCRIPTOR: &'static str = "Verbe";
-    pub const RELATION_COMPLEMENT: &'static str = "Objet";
-    pub const CREATE_RELATION_NAV: &'static str = "Relation...";
-    pub const CREATE_RELATION_TITLE: &'static str = "Ajouter une relation...";
+    pub const CREATE_ABSTRACT_NAV: ConstStr = PreEscaped("Abstrait...");
+    pub const CREATE_ABSTRACT_TITLE: ConstStr = PreEscaped("Ajouter un élément abstrait...");
+    pub const CREATE_ABSTRACT_NAME_PLACEHOLDER: ConstStr = PreEscaped("Nom optionel");
+
+    pub const RELATION_SUBJECT: ConstStr = PreEscaped("Sujet");
+    pub const RELATION_DESCRIPTOR: ConstStr = PreEscaped("Verbe");
+    pub const RELATION_COMPLEMENT: ConstStr = PreEscaped("Objet");
+    pub const CREATE_RELATION_NAV: ConstStr = PreEscaped("Relation...");
+    pub const CREATE_RELATION_TITLE: ConstStr = PreEscaped("Ajouter une relation...");
 
     pub const NAMED_ATOM: &'static str = "est nommé";
 }
 
 /// Generates sequence of navigation links depending on state.
-fn navigation_links<'a>(
-    edit_state: &'a EditState,
-    displayed: Option<Index>,
-) -> impl RenderOnce + 'a {
-    owned_html! {
-        a(href=Homepage::url(edit_state)) : lang::HOMEPAGE;
-        a(href=ListAllElements::url(edit_state)) : lang::ALL_ELEMENTS_NAV;
-        a(href=CreateAtom::url(edit_state), class="atom") : lang::CREATE_ATOM_NAV;
-        a(href=CreateAbstract::url(edit_state), class="abstract") : lang::CREATE_ABSTRACT_NAV;
-        |tmpl| selection_nav_link(tmpl, lang::RELATION_SUBJECT, displayed, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e });
-        |tmpl| selection_nav_link(tmpl, lang::RELATION_DESCRIPTOR, displayed, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e });
-        |tmpl| selection_nav_link(tmpl, lang::RELATION_COMPLEMENT, displayed, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e });
-        a(href=CreateRelation::url(Some(edit_state)), class="relation") : lang::CREATE_RELATION_NAV;
+fn navigation_links(edit_state: &EditState, displayed: Option<Index>) -> Markup {
+    html! {
+        a href=(Homepage::url(edit_state)) { (lang::HOMEPAGE) }
+        a href=(ListAllElements::url(edit_state)) { (lang::ALL_ELEMENTS_NAV) }
+        a href=(CreateAtom::url(edit_state)) class="atom" { (lang::CREATE_ATOM_NAV) }
+        a href=(CreateAbstract::url(edit_state)) class="abstract" { (lang::CREATE_ABSTRACT_NAV) }
+        (selection_nav_link(lang::RELATION_SUBJECT, displayed, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e }))
+        (selection_nav_link(lang::RELATION_DESCRIPTOR, displayed, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e }))
+        (selection_nav_link(lang::RELATION_COMPLEMENT, displayed, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e }))
+        a href=(CreateRelation::url(Some(edit_state))) class="relation" { (lang::CREATE_RELATION_NAV) }
     }
 }
 fn selection_nav_link<IFV, WFV>(
-    tmpl: &mut TemplateBuffer,
-    field_text: &str,
+    field_text: PreEscaped<&str>,
     displayed: Option<Index>,
     edit_state: &EditState,
     init_field_value: IFV,
     with_field_value: WFV,
-) where
+) -> Markup
+where
     IFV: FnOnce(&EditState) -> Option<Index>,
     WFV: FnOnce(&EditState, Option<Index>) -> EditState,
 {
-    match (init_field_value(edit_state), displayed) {
-        (None, None) => (),
-        (None, Some(displayed)) => {
-            tmpl << html! {
-                a(href=DisplayElement::url(displayed, &with_field_value(edit_state, Some(displayed))), class="relation") : format!("+ {}", field_text);
+    html! {
+        @match (init_field_value(edit_state), displayed) {
+            (None, None) => {},
+            (None, Some(displayed)) => {
+                a href=(DisplayElement::url(displayed, &with_field_value(edit_state, Some(displayed)))) class="relation" {
+                    "+ " (field_text)
+                }
+            },
+            (Some(selected), Some(displayed)) if selected == displayed => {
+                a href=(DisplayElement::url(displayed, &with_field_value(edit_state, None))) class="relation" {
+                    "- " (field_text) ": " (displayed)
+                }
             }
-        }
-        (Some(selected), Some(displayed)) if selected == displayed => {
-            tmpl << html! {
-                a(href=DisplayElement::url(displayed, &with_field_value(edit_state, None)), class="relation") : format!("- {}: {}", field_text, displayed);
-            }
-        }
-        (Some(selected), _) => {
-            tmpl << html! {
-                a(href=DisplayElement::url(selected, edit_state), class="relation") : format!("{}: {}", field_text, selected);
+            (Some(selected), _) => {
+                a href=(DisplayElement::url(selected, edit_state)) class="relation" {
+                    (field_text) ": " (selected)
+                }
             }
         }
     }
 }
 
 /// Generated wiki page final assembly. Adds the navigation bar, overall html structure.
-fn compose_wiki_page<T, C, N>(title: T, content: C, navigation_links: N) -> String
-where
-    T: RenderOnce,
-    C: RenderOnce,
-    N: RenderOnce,
-{
+fn compose_wiki_page<T: AsRef<str>>(
+    title: PreEscaped<T>,
+    content: Markup,
+    navigation_links: Markup,
+) -> String {
     let template = html! {
-        : horrorshow::helper::doctype::HTML;
+        (maud::DOCTYPE)
         html {
             head {
-                meta(charset="UTF-8");
-                link(rel="stylesheet", type="text/css", href=StaticAsset::url("style.css"));
-                meta(name="viewport", content="width=device-width, initial-scale=1.0");
-                title : title;
+                meta charset="UTF-8";
+                link rel="stylesheet" type="text/css" href=(StaticAsset::url("style.css"));
+                meta name="viewport" content="width=device-width, initial-scale=1.0";
+                title { (title) };
             }
             body {
-                nav : navigation_links;
-                main : content;
-                script(src=StaticAsset::url("client.js")) {}
+                nav { (navigation_links) }
+                main { (content) }
+                script src=(StaticAsset::url("client.js"));
             }
         }
     };
-    template.into_string().unwrap()
+    template.into_string()
 }
 
 fn parse_index(s: &str) -> Result<Index, web::Error> {

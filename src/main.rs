@@ -1,6 +1,7 @@
+#![feature(proc_macro_hygiene)]
+
 // Wiki
-#[macro_use]
-extern crate horrorshow; // HTML template engine
+extern crate maud; // HTML template engine
 extern crate hyper;
 extern crate percent_encoding;
 extern crate signal_hook;

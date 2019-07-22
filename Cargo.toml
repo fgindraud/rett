@@ -5,7 +5,7 @@ authors = ["François Gindraud <francois.gindraud@gmail.com>"]
 description = "Tool to store, manipulate and display relational information"
 
 [dependencies]
-horrorshow = "0.6"
+maud = "0.21.0"
 percent-encoding = "1"
 hyper = "0.12.30"
 
