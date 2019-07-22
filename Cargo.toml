@@ -5,9 +5,19 @@ authors = ["François Gindraud <francois.gindraud@gmail.com>"]
 description = "Tool to store, manipulate and display relational information"
 
 [dependencies]
-clap = "2"
 horrorshow = "0.6"
-hyper = "0.12.30"
 percent-encoding = "1"
-tokio = { version = "^0.1.14", default-features = false, features = ["rt-full"] } # Version from hyper
-signal-hook = { version = "^0.1.9", features = ["tokio-support"] }
+hyper = "0.12.30"
+
+[dependencies.clap]
+version = "2"
+default-features = false
+
+[dependencies.tokio]
+version = "^0.1.14" # Version from hyper
+default-features = false
+features = ["rt-full"]
+
+[dependencies.signal-hook]
+version = "^0.1.9" # Version from hyper
+features = ["tokio-support"]
