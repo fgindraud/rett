@@ -14,6 +14,9 @@ extern crate clap; // Command line parser
 mod relations;
 use relations::Database;
 
+/// Web related utilities, used to build wiki interface
+mod web;
+
 /// Wiki interface
 mod wiki;
 use std::fs::File;

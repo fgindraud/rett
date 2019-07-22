@@ -1,37 +1,4 @@
-/******************************************************************************
- * HTTP server.
- */
-pub fn run(addr: &str, file: &Path) -> ! {
-    let nb_threads = 2;
-    let db = state::State::from_file(file);
-    eprintln!("Wiki starting on {}", addr);
-    rouille::start_server_with_pool(addr, Some(nb_threads), move |request| {
-        router!(request,
-                    // Main page and special pages
-        //            (GET) ["/"] => { main_page(&db.access()) },
-        //            (GET) ["/all"] => { page_all_objects(&db.access()) },
-        //            (GET) ["/create/atom"] => { page_create_atom() },
-        //            (POST) ["/create/atom"] => { post_create_atom(request, &mut db.modify()) },
-        //            (GET) ["/create/abstract"] => { page_create_abstract() },
-        //            (POST) ["/create/abstract"] => { post_create_abstract(request, &mut db.modify()) },
-        //            (GET) ["/create/link/from/{id}", id: Index] => {
-        //                match db.access ().get_object(id) {
-        //                    Ok(object) => page_create_link(object, LinkSide::From),
-        //                    _ => Response::empty_400(),
-        //                }
-        //            },
-        //            (GET) ["/create/link/to/{id}", id: Index] => {
-        //                match db.access ().get_object(id) {
-        //                    Ok(object) => page_create_link(object, LinkSide::To),
-        //                    _ => Response::empty_400(),
-        //                }
-        //            },
-        //            (POST) ["/create/link"] => { post_create_link(request, &mut db.modify()) },
-        //            // Contextual actions from overlays
-        //            (POST) ["/edit/description"] => { post_edit_description(request, &mut db.modify()) },
-        //            (POST) ["/remove"] => { post_remove(request, &mut db.modify()) },
-    })
-}
+
 
 fn object_name<'a>(object: ObjectRef<'a>) -> String {
     match *object {
@@ -123,83 +90,8 @@ fn page_for_object<'a>(object: ObjectRef<'a>) -> Response {
     wiki_page(&name, nav, content)
 }
 
-fn page_create_link<'a>(object: ObjectRef<'a>, link_side: LinkSide) -> Response {
-    let defined_link_side_text = match link_side {
-        LinkSide::From => "from",
-        LinkSide::To => "to",
-    };
-    let undefined_link_side_text = match link_side {
-        LinkSide::From => "to",
-        LinkSide::To => "from",
-    };
-    let graph = object.graph();
-    let name = object_name(object);
-    let class = object_html_class(object);
-    let url = object_url(object.index());
-
-    let title = format!("Create link {} {}", defined_link_side_text, name);
-    let content = html! {
-        p {
-            : format!("Create link {} ", defined_link_side_text);
-            a(href=url, class=class) : name;
-        }
-        form(method="post", action="/create/link") {
-            input(type="hidden", name=defined_link_side_text, value=object.index());
-            @ for object in graph.objects() {
-                input(type="radio", name=undefined_link_side_text, value=object.index()) {
-                    : object_name(object);
-                }
-                br;
-            }
-            input(type="submit", value="Create");
-        }
-    };
-    wiki_page(title, html!{}, content)
-}
-fn post_create_link(request: &Request, graph: &mut Graph) -> Response {
-    let l = try_or_400!(post_input!(request, { from: Index, to: Index }));
-    let index = try_or_400!(graph.use_link(Link::new(l.from, l.to)));
-    Response::redirect_303(object_url(index))
-}
-
 fn post_remove(request: &Request, graph: &mut Graph) -> Response {
     let form_data = try_or_400!(post_input!(request, { index: Index }));
     let _ = try_or_400!(graph.remove_object(form_data.index));
     Response::redirect_303("/")
-}
-
-// Page template
-fn wiki_page<T, N, C>(title: T, additional_nav_links: N, content: C) -> Response
-where
-    T: RenderOnce,
-    N: RenderOnce,
-    C: RenderOnce,
-{
-    let template = html! {
-        : horrorshow::helper::doctype::HTML;
-        html {
-            head {
-                link(rel="stylesheet", type="text/css", href="/static/style.css");
-                script(src="/static/jquery.js") {}
-                meta(name="viewport", content="width=device-width, initial-scale=1.0");
-                title : title;
-            }
-            body {
-                nav {
-                    a(href="/") : "Home";
-                    a(href="/create/atom", class="atom") : "Atom";
-                    a(href="/create/abstract", class="abstract") : "Abstract";
-                    : additional_nav_links;
-                    a(href="/all") : "All";
-                    a(href="/static/doc.html") : "Doc";
-                    // TODO other
-                }
-                main {
-                    : content;
-                }
-                script(src="/static/client.js") {}
-            }
-        }
-    };
-    Response::html(template.into_string().unwrap())
 }
