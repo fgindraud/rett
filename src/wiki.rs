@@ -42,6 +42,7 @@ pub fn run(addr: &str, database_file: &Path) {
                 web::end_point_handler::<DisplayElement>,
                 web::end_point_handler::<CreateAtom>,
                 web::end_point_handler::<CreateAbstract>,
+                web::end_point_handler::<CreateRelation>,
                 web::end_point_handler::<StaticAsset>,
             ];
             web::handle_request(request, state.clone(), handlers.iter())
@@ -75,7 +76,7 @@ pub fn run(addr: &str, database_file: &Path) {
  */
 
 // TODO copy for convenience with url generation. should be reworked one day
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct EditState {
     // Relation
     subject: Option<Index>,
@@ -89,11 +90,10 @@ impl web::QueryFormat for EditState {
         builder.optional_entry("complement", self.complement);
     }
     fn from_query(entries: &web::UrlDecodedEntries) -> Result<Self, web::Error> {
-        let parse_index = |s: &str| s.parse::<usize>().map_err(|_| web::Error::BadRequest);
         Ok(EditState {
-            subject: entries.get("subject").map(parse_index).transpose()?,
-            descriptor: entries.get("descriptor").map(parse_index).transpose()?,
-            complement: entries.get("complement").map(parse_index).transpose()?,
+            subject: parse_optional_index(entries.get("subject"))?,
+            descriptor: parse_optional_index(entries.get("descriptor"))?,
+            complement: parse_optional_index(entries.get("complement"))?,
         })
     }
 }
@@ -113,7 +113,7 @@ impl EndPoint for DisplayElement {
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/element/")) {
             (&Method::GET, Some(index)) => Ok(FromRequestOk::Value(DisplayElement {
-                index: index.parse().map_err(|_| web::Error::BadRequest)?,
+                index: parse_index(index)?,
                 edit_state: web::from_query(r.uri().query())?,
             })),
             _ => Err(FromRequestError::NoMatch(r)),
@@ -186,8 +186,8 @@ impl EndPoint for Homepage {
                 }
             }
             form(method="post", action=CreateAtom::url(&self.edit_state), class="hbox") {
-                p(class="fill_box") : lang::HOMEPAGE_HELP;
-                button(type="submit") : "_wiki_homepage";
+                label(for="wiki_homepage") : lang::HOMEPAGE_HELP;
+                button(id="wiki_homepage") : "_wiki_homepage";
                 input(type="hidden", name="text", value="_wiki_homepage");
             }
         };
@@ -273,8 +273,8 @@ impl EndPoint for CreateAtom {
                     form(method="post", action=CreateAtom::url(&edit_state), class="vbox") {
                         input(type="text", name="text", required, placeholder=lang::ATOM_TEXT);
                         div(class="hbox") {
-                            button(type="submit", name="preview") : lang::PREVIEW_BUTTON;
-                            button(type="submit", name="create") : lang::COMMIT_BUTTON;
+                            button(name="preview", formmethod="get") : lang::PREVIEW_BUTTON;
+                            button(name="create") : lang::COMMIT_BUTTON;
                         }
                     }
                 };
@@ -330,12 +330,12 @@ impl EndPoint for CreateAbstract {
         match self {
             CreateAbstract::Get { edit_state } => {
                 let content = html! {
-                    h1(class="atom") : lang::CREATE_ABSTRACT_TITLE;
+                    h1(class="abstract") : lang::CREATE_ABSTRACT_TITLE;
                     form(method="post", action=CreateAbstract::url(&edit_state), class="vbox") {
                         input(type="text", name="name", placeholder=lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
                         div(class="hbox") {
-                            button(type="submit", name="preview") : lang::PREVIEW_BUTTON;
-                            button(type="submit", name="create") : lang::COMMIT_BUTTON;
+                            button(name="preview", formmethod="get") : lang::PREVIEW_BUTTON;
+                            button(name="create") : lang::COMMIT_BUTTON;
                         }
                     }
                 };
@@ -356,6 +356,94 @@ impl EndPoint for CreateAbstract {
                     });
                 }
                 web::response_redirection(&DisplayElement::url(index, &edit_state))
+            }
+        }
+    }
+}
+
+/// Create a Relation.
+enum CreateRelation {
+    Get { edit_state: EditState },
+    Post { relation: Relation },
+}
+impl CreateRelation {
+    fn url(edit_state: Option<&EditState>) -> String {
+        match edit_state {
+            Some(edit_state) => web::to_path_and_query("/create/relation", edit_state),
+            None => "/create/relation".to_string(),
+        }
+    }
+}
+impl EndPoint for CreateRelation {
+    type State = State;
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
+        match (r.method(), r.uri().path()) {
+            (&Method::GET, "/create/relation") => Ok(FromRequestOk::Value(CreateRelation::Get {
+                edit_state: web::from_query(r.uri().query())?,
+            })),
+            (&Method::POST, "/create/relation") => web::with_post_entries(r, move |entries| {
+                let relation = Relation {
+                    subject: parse_required_index(entries.get("subject"))?,
+                    descriptor: parse_required_index(entries.get("descriptor"))?,
+                    complement: parse_optional_index(entries.get("complement"))?,
+                };
+                Ok(CreateRelation::Post { relation })
+            }),
+            _ => Err(FromRequestError::NoMatch(r)),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        match self {
+            CreateRelation::Get { edit_state } => {
+                let state = &state.database.borrow();
+                let field_preview_text = |index: Option<Index>| match index {
+                    None => "Missing".to_string(),
+                    Some(index) => match state.element(index) {
+                        Ok(element) => element_name(element),
+                        Err(_) => "Invalid".to_string(),
+                    },
+                };
+                let content = html! {
+                    h1(class="relation") : lang::CREATE_RELATION_TITLE;
+                    form(method="post", action=CreateRelation::url(None), class="vbox") {
+                        table {
+                            tr {
+                                td : lang::RELATION_SUBJECT;
+                                td : field_preview_text(edit_state.subject);
+                            }
+                            tr {
+                                td : lang::RELATION_DESCRIPTOR;
+                                td : field_preview_text(edit_state.descriptor);
+                            }
+                            tr {
+                                td : lang::RELATION_COMPLEMENT;
+                                td : field_preview_text(edit_state.complement);
+                            }
+                        }
+                        input(type="hidden", name="subject", value=edit_state.subject);
+                        input(type="hidden", name="descriptor", value=edit_state.descriptor);
+                        @if let Some(complement) = edit_state.complement {
+                            input(type="hidden", name="complement", value=complement);
+                        }
+                        button : lang::COMMIT_BUTTON;
+                    }
+                };
+                let nav = navigation_links(&edit_state, None);
+                let page = compose_wiki_page(lang::CREATE_RELATION_TITLE, content, nav);
+                web::response_html(page)
+            }
+            CreateRelation::Post { relation } => {
+                let insertion = state.database.borrow_mut().insert_relation(relation);
+                match insertion {
+                    Ok(index) => web::response_redirection(&DisplayElement::url(
+                        index,
+                        &EditState::default(),
+                    )),
+                    Err(_) => Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(Body::empty())
+                        .unwrap(),
+                }
             }
         }
     }
@@ -435,6 +523,8 @@ mod lang {
     pub const RELATION_SUBJECT: &'static str = "Sujet";
     pub const RELATION_DESCRIPTOR: &'static str = "Verbe";
     pub const RELATION_COMPLEMENT: &'static str = "Objet";
+    pub const CREATE_RELATION_NAV: &'static str = "Relation...";
+    pub const CREATE_RELATION_TITLE: &'static str = "Ajouter une relation...";
 
     pub const NAMED_ATOM: &'static str = "est nommé";
 }
@@ -449,12 +539,13 @@ fn navigation_links<'a>(
         a(href=ListAllElements::url(edit_state)) : lang::ALL_ELEMENTS_NAV;
         a(href=CreateAtom::url(edit_state), class="atom") : lang::CREATE_ATOM_NAV;
         a(href=CreateAbstract::url(edit_state), class="abstract") : lang::CREATE_ABSTRACT_NAV;
-        |tmpl| relation_selection_nav_link(tmpl, lang::RELATION_SUBJECT, displayed, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e });
-        |tmpl| relation_selection_nav_link(tmpl, lang::RELATION_DESCRIPTOR, displayed, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e });
-        |tmpl| relation_selection_nav_link(tmpl, lang::RELATION_COMPLEMENT, displayed, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e });
+        |tmpl| selection_nav_link(tmpl, lang::RELATION_SUBJECT, displayed, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e });
+        |tmpl| selection_nav_link(tmpl, lang::RELATION_DESCRIPTOR, displayed, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e });
+        |tmpl| selection_nav_link(tmpl, lang::RELATION_COMPLEMENT, displayed, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e });
+        a(href=CreateRelation::url(Some(edit_state)), class="relation") : lang::CREATE_RELATION_NAV;
     }
 }
-fn relation_selection_nav_link<IFV, WFV>(
+fn selection_nav_link<IFV, WFV>(
     tmpl: &mut TemplateBuffer,
     field_text: &str,
     displayed: Option<Index>,
@@ -509,6 +600,16 @@ where
         }
     };
     template.into_string().unwrap()
+}
+
+fn parse_index(s: &str) -> Result<Index, web::Error> {
+    s.parse().map_err(|_| web::Error::BadRequest)
+}
+fn parse_optional_index(s: Option<&str>) -> Result<Option<Index>, web::Error> {
+    s.map(parse_index).transpose()
+}
+fn parse_required_index(s: Option<&str>) -> Result<Index, web::Error> {
+    s.map_or(Err(web::Error::BadRequest), parse_index)
 }
 
 /******************************************************************************
