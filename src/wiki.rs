@@ -399,7 +399,12 @@ impl EndPoint for CreateRelation {
         match self {
             CreateRelation::Get { edit_state } => {
                 let state = &state.database.borrow();
-                let enable_form = edit_state.subject.is_some() && edit_state.descriptor.is_some();
+                let enable_form = {
+                    let valid_or = |i: Option<Index>, d| i.map_or(d, |i| state.element(i).is_ok());
+                    valid_or(edit_state.subject, false)
+                        && valid_or(edit_state.descriptor, false)
+                        && valid_or(edit_state.complement, true)
+                };
                 let field_preview = |name: PreEscaped<&str>,
                                      index: Option<Index>,
                                      allow_missing: bool|
@@ -520,9 +525,11 @@ mod lang {
     use maud::PreEscaped;
     type ConstStr = PreEscaped<&'static str>;
 
+    pub const NAMED_ATOM: &'static str = "est nommé";
+
     pub const COMMIT_BUTTON: ConstStr = PreEscaped("Valider");
     pub const PREVIEW_BUTTON: ConstStr = PreEscaped("Prévisualiser");
-    pub const INVALID_ELEMENT_INDEX: ConstStr = PreEscaped("Index d'élément invalide");
+    pub const INVALID_ELEMENT_INDEX: ConstStr = PreEscaped("Index invalide");
 
     pub const HOMEPAGE: ConstStr = PreEscaped("Accueil");
     pub const HOMEPAGE_HELP: ConstStr =
@@ -531,9 +538,9 @@ mod lang {
     pub const ALL_ELEMENTS_NAV: ConstStr = PreEscaped("Éléments");
     pub const ALL_ELEMENTS_TITLE: ConstStr = PreEscaped("Liste des éléments");
 
+    pub const ATOM_TEXT: ConstStr = PreEscaped("Texte");
     pub const CREATE_ATOM_NAV: ConstStr = PreEscaped("Atome...");
     pub const CREATE_ATOM_TITLE: ConstStr = PreEscaped("Ajouter un atome...");
-    pub const ATOM_TEXT: ConstStr = PreEscaped("Texte");
 
     pub const CREATE_ABSTRACT_NAV: ConstStr = PreEscaped("Abstrait...");
     pub const CREATE_ABSTRACT_TITLE: ConstStr = PreEscaped("Ajouter un élément abstrait...");
@@ -545,8 +552,6 @@ mod lang {
     pub const CREATE_RELATION_NAV: ConstStr = PreEscaped("Relation...");
     pub const CREATE_RELATION_TITLE: ConstStr = PreEscaped("Ajouter une relation...");
     pub const CREATE_RELATION_MISSING: ConstStr = PreEscaped("Champ manquant !");
-
-    pub const NAMED_ATOM: &'static str = "est nommé";
 }
 
 /// Generates sequence of navigation links depending on state.

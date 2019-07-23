@@ -77,31 +77,15 @@ nav a:hover { background-color: #bbb; }
 }
 .hbox > *:first-child { margin-left: 0; }
 
-/* Homogeneous buttons for both <a> and <button> (in form). */
-button, a.button {
-	background-color: #eee;
-	color: blue;
-	font-size: 1em;
-	padding: 0.5em;
-}
-button:hover, a.button:hover {
-	background-color: #ccc;
-}
-a.button {
-	display: flex;
-	justify-content: center;
-	align-items: center;
-	text-decoration: none;
-}
-button {
-	display: block;
-	border: none;
-}
-
 /* For title only. */
 h1 {
 	margin-top: 0;
 	text-align: center;
+}
+
+button {
+	font-size: 1em;
+	padding: 0.5em;
 }
 
 table {
@@ -110,25 +94,7 @@ table {
 td {
 	padding: 5px;
 }
+
 .error {
 	color: red;
-}
-
-/* FIXME what follows is currently unused... keep or remove */
-
-/* Define as overlay: over the screen. Suitable for hbox/vbox. */
-.overlay {
-	position: fixed;
-	top: 0;
-	left: 0;
-	height: 100%;
-	width: 100%;
-	padding: 5px;
-	background-color: white;
-}
-
-/* Content specific rules */
-#edit_description_content {
-	resize: none;
-	height: 80%;
 }
