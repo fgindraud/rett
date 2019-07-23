@@ -357,15 +357,17 @@ impl EndPoint for CreateAbstract {
 
 /// Create a Relation.
 enum CreateRelation {
-    Get { edit_state: EditState },
-    Post { relation: Relation },
+    Get {
+        edit_state: EditState,
+    },
+    Post {
+        relation: Relation,
+        edit_state: EditState,
+    },
 }
 impl CreateRelation {
-    fn url(edit_state: Option<&EditState>) -> String {
-        match edit_state {
-            Some(edit_state) => web::to_path_and_query("/create/relation", edit_state),
-            None => "/create/relation".to_string(),
-        }
+    fn url(edit_state: &EditState) -> String {
+        web::to_path_and_query("/create/relation", edit_state)
     }
 }
 impl EndPoint for CreateRelation {
@@ -375,14 +377,21 @@ impl EndPoint for CreateRelation {
             (&Method::GET, "/create/relation") => Ok(FromRequestOk::Value(CreateRelation::Get {
                 edit_state: web::from_query(r.uri().query())?,
             })),
-            (&Method::POST, "/create/relation") => web::with_post_entries(r, move |entries| {
-                let relation = Relation {
-                    subject: parse_required_index(entries.get("subject"))?,
-                    descriptor: parse_required_index(entries.get("descriptor"))?,
-                    complement: parse_optional_index(entries.get("complement"))?,
-                };
-                Ok(CreateRelation::Post { relation })
-            }),
+            (&Method::POST, "/create/relation") => {
+                let edit_state = web::from_query(r.uri().query())?;
+                web::with_post_entries(r, move |entries| {
+                    // Missing fields implies not using the form, fail with bad request.
+                    let relation = Relation {
+                        subject: parse_required_index(entries.get("subject"))?,
+                        descriptor: parse_required_index(entries.get("descriptor"))?,
+                        complement: parse_optional_index(entries.get("complement"))?,
+                    };
+                    Ok(CreateRelation::Post {
+                        relation,
+                        edit_state,
+                    })
+                })
+            }
             _ => Err(FromRequestError::NoMatch(r)),
         }
     }
@@ -390,32 +399,37 @@ impl EndPoint for CreateRelation {
         match self {
             CreateRelation::Get { edit_state } => {
                 let state = &state.database.borrow();
-                let field_preview_text = |index: Option<Index>| match index {
-                    None => "Missing".to_string(),
-                    Some(index) => match state.element(index) {
-                        Ok(element) => element_name(element),
-                        Err(_) => "Invalid".to_string(),
-                    },
+                let enable_form = edit_state.subject.is_some() && edit_state.descriptor.is_some();
+                let field_preview = |name: PreEscaped<&str>,
+                                     index: Option<Index>,
+                                     allow_missing: bool|
+                 -> Markup {
+                    html! {
+                        tr {
+                            td { (name) }
+                            @match index {
+                                None => @match allow_missing {
+                                    true => { td; },
+                                    false => { td class="error" { (lang::CREATE_RELATION_MISSING) } },
+                                },
+                                Some(index) => @match state.element(index) {
+                                    Ok(element) => { td { (element_link(element, &edit_state)) } },
+                                    Err(_) => { td class="error" { (lang::INVALID_ELEMENT_INDEX) ": " (index) } }
+                                }
+                            }
+                        }
+                    }
                 };
                 let content = html! {
                     h1 class="relation" { (lang::CREATE_RELATION_TITLE) }
-                    form method="post" action=(CreateRelation::url(None)) class="vbox" {
+                    form method="post" action=(CreateRelation::url(&edit_state)) class="vbox" {
                         table {
-                            tr {
-                                td { (lang::RELATION_SUBJECT) }
-                                td { (field_preview_text(edit_state.subject)) }
-                            }
-                            tr {
-                                td { (lang::RELATION_DESCRIPTOR) }
-                                td { (field_preview_text(edit_state.descriptor)) }
-                            }
-                            tr {
-                                td { (lang::RELATION_COMPLEMENT) }
-                                td { (field_preview_text(edit_state.complement)) }
-                            }
+                            (field_preview(lang::RELATION_SUBJECT, edit_state.subject, false))
+                            (field_preview(lang::RELATION_DESCRIPTOR, edit_state.descriptor, false))
+                            (field_preview(lang::RELATION_COMPLEMENT, edit_state.complement, true))
                         }
                         @if let Some(subject) = edit_state.subject {
-                            input type="hidden"  name="subject" value=(subject);
+                            input type="hidden" name="subject" value=(subject);
                         }
                         @if let Some(descriptor) = edit_state.descriptor {
                             input type="hidden" name="descriptor" value=(descriptor);
@@ -423,25 +437,22 @@ impl EndPoint for CreateRelation {
                         @if let Some(complement) = edit_state.complement {
                             input type="hidden" name="complement" value=(complement);
                         }
-                        button { (lang::COMMIT_BUTTON) }
+                        button disabled?[!enable_form] { (lang::COMMIT_BUTTON) }
                     }
                 };
                 let nav = navigation_links(&edit_state, None);
                 let page = compose_wiki_page(lang::CREATE_RELATION_TITLE, content, nav);
                 web::response_html(page)
             }
-            CreateRelation::Post { relation } => {
+            CreateRelation::Post {
+                relation,
+                edit_state,
+            } => {
                 let insertion = state.database.borrow_mut().insert_relation(relation);
-                match insertion {
-                    Ok(index) => web::response_redirection(&DisplayElement::url(
-                        index,
-                        &EditState::default(),
-                    )),
-                    Err(_) => Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Body::empty())
-                        .unwrap(),
-                }
+                web::response_redirection(&match insertion {
+                    Ok(index) => DisplayElement::url(index, &EditState::default()),
+                    Err(_) => CreateRelation::url(&edit_state), // Allow retrying
+                })
             }
         }
     }
@@ -452,6 +463,13 @@ fn relation_link(relation: Ref<Relation>, edit_state: &EditState) -> Markup {
     html! {
         a href=(DisplayElement::url(relation.index(), edit_state)) class="relation" {
             "Element " (relation.index())
+        }
+    }
+}
+fn element_link(element: Ref<Element>, edit_state: &EditState) -> Markup {
+    html! {
+        a href=(DisplayElement::url(element.index(), edit_state)) class=(css_class_name(element)) {
+            (element_name(element))
         }
     }
 }
@@ -504,6 +522,7 @@ mod lang {
 
     pub const COMMIT_BUTTON: ConstStr = PreEscaped("Valider");
     pub const PREVIEW_BUTTON: ConstStr = PreEscaped("Prévisualiser");
+    pub const INVALID_ELEMENT_INDEX: ConstStr = PreEscaped("Index d'élément invalide");
 
     pub const HOMEPAGE: ConstStr = PreEscaped("Accueil");
     pub const HOMEPAGE_HELP: ConstStr =
@@ -525,6 +544,7 @@ mod lang {
     pub const RELATION_COMPLEMENT: ConstStr = PreEscaped("Objet");
     pub const CREATE_RELATION_NAV: ConstStr = PreEscaped("Relation...");
     pub const CREATE_RELATION_TITLE: ConstStr = PreEscaped("Ajouter une relation...");
+    pub const CREATE_RELATION_MISSING: ConstStr = PreEscaped("Champ manquant !");
 
     pub const NAMED_ATOM: &'static str = "est nommé";
 }
@@ -539,7 +559,7 @@ fn navigation_links(edit_state: &EditState, displayed: Option<Index>) -> Markup 
         (selection_nav_link(lang::RELATION_SUBJECT, displayed, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e }))
         (selection_nav_link(lang::RELATION_DESCRIPTOR, displayed, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e }))
         (selection_nav_link(lang::RELATION_COMPLEMENT, displayed, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e }))
-        a href=(CreateRelation::url(Some(edit_state))) class="relation" { (lang::CREATE_RELATION_NAV) }
+        a href=(CreateRelation::url(edit_state)) class="relation" { (lang::CREATE_RELATION_NAV) }
     }
 }
 fn selection_nav_link<IFV, WFV>(
@@ -645,10 +665,10 @@ impl EndPoint for StaticAsset {
         }
     }
 }
-struct AssetDefinition {
-    path: &'static str,
-    mime: &'static str,
-    content: &'static str,
+struct AssetDefinition<'a> {
+    path: &'a str,
+    mime: &'a str,
+    content: &'a str,
 }
 const ASSETS: [AssetDefinition; 2] = [
     AssetDefinition {

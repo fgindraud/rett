@@ -53,12 +53,6 @@ nav a {
 nav a:first-child { border-top: none; }
 nav a:hover { background-color: #bbb; }
 
-/* For title only. */
-h1 {
-	margin-top: 0;
-	text-align: center;
-}
-
 /* vertical/horizontal containers, with auto scaling */
 .vbox, .hbox {
 	display: flex;
@@ -102,6 +96,22 @@ a.button {
 button {
 	display: block;
 	border: none;
+}
+
+/* For title only. */
+h1 {
+	margin-top: 0;
+	text-align: center;
+}
+
+table {
+	width: 100%;
+}
+td {
+	padding: 5px;
+}
+.error {
+	color: red;
 }
 
 /* FIXME what follows is currently unused... keep or remove */
