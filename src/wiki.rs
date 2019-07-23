@@ -581,17 +581,21 @@ where
     html! {
         @match (init_field_value(edit_state), displayed) {
             (None, None) => {},
+            (Some(selected), Some(displayed)) => @if selected == displayed {
+                a.relation href=(DisplayElement::url(displayed, &with_field_value(edit_state, None))) {
+                    "- " (field_text) ": " (selected)
+                }
+            } @else {
+                a.relation href=(DisplayElement::url(displayed, &with_field_value(edit_state, Some(displayed)))) {
+                    "= " (field_text) ": " (selected)
+                }
+            },
             (None, Some(displayed)) => {
                 a.relation href=(DisplayElement::url(displayed, &with_field_value(edit_state, Some(displayed)))) {
                     "+ " (field_text)
                 }
             },
-            (Some(selected), Some(displayed)) if selected == displayed => {
-                a.relation href=(DisplayElement::url(displayed, &with_field_value(edit_state, None))) {
-                    "- " (field_text) ": " (displayed)
-                }
-            }
-            (Some(selected), _) => {
+            (Some(selected), None) => {
                 a.relation href=(DisplayElement::url(selected, edit_state)) {
                     (field_text) ": " (selected)
                 }
