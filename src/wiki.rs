@@ -181,9 +181,9 @@ impl EndPoint for Homepage {
                     }
                 }
             }
-            form method="post" action=(CreateAtom::url(&self.edit_state)) class="hbox" {
+            form.hbox method="post" action=(CreateAtom::url(&self.edit_state)) {
                 label for="wiki_homepage" { (lang::HOMEPAGE_HELP) }
-                button id="wiki_homepage" { "_wiki_homepage" }
+                button#wiki_homepage { "_wiki_homepage" }
                 input type="hidden" name="text" value="_wiki_homepage";
             }
         };
@@ -263,10 +263,10 @@ impl EndPoint for CreateAtom {
         match self {
             CreateAtom::Get { edit_state } => {
                 let content = html! {
-                    h1 class="atom" { (lang::CREATE_ATOM_TITLE) }
-                    form method="post" action=(CreateAtom::url(&edit_state)) class="vbox" {
+                    h1.atom { (lang::CREATE_ATOM_TITLE) }
+                    form.vbox method="post" action=(CreateAtom::url(&edit_state)) {
                         input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
-                        div class="hbox" {
+                        div.hbox {
                             button formmethod="get" { (lang::PREVIEW_BUTTON) }
                             button { (lang::COMMIT_BUTTON) }
                         }
@@ -324,10 +324,10 @@ impl EndPoint for CreateAbstract {
         match self {
             CreateAbstract::Get { edit_state } => {
                 let content = html! {
-                    h1 class="abstract" { (lang::CREATE_ABSTRACT_TITLE) }
-                    form method="post" action=(CreateAbstract::url(&edit_state)) class="vbox" {
+                    h1.abstract { (lang::CREATE_ABSTRACT_TITLE) }
+                    form.vbox method="post" action=(CreateAbstract::url(&edit_state)) {
                         input type="text" name="name" placeholder=(lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
-                        div class="hbox" {
+                        div.hbox {
                             button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
                             button { (lang::COMMIT_BUTTON) }
                         }
@@ -410,19 +410,19 @@ impl EndPoint for CreateRelation {
                             @match index {
                                 None => @match allow_missing {
                                     true => { td; },
-                                    false => { td class="error" { (lang::CREATE_RELATION_MISSING) } },
+                                    false => { td.error { (lang::CREATE_RELATION_MISSING) } },
                                 },
                                 Some(index) => @match state.element(index) {
                                     Ok(element) => { td { (element_link(element, &edit_state)) } },
-                                    Err(_) => { td class="error" { (lang::INVALID_ELEMENT_INDEX) ": " (index) } }
+                                    Err(_) => { td.error { (lang::INVALID_ELEMENT_INDEX) ": " (index) } }
                                 }
                             }
                         }
                     }
                 };
                 let content = html! {
-                    h1 class="relation" { (lang::CREATE_RELATION_TITLE) }
-                    form method="post" action=(CreateRelation::url(&edit_state)) class="vbox" {
+                    h1.relation { (lang::CREATE_RELATION_TITLE) }
+                    form.vbox method="post" action=(CreateRelation::url(&edit_state)) {
                         table {
                             (field_preview(lang::RELATION_SUBJECT, edit_state.subject, false))
                             (field_preview(lang::RELATION_DESCRIPTOR, edit_state.descriptor, false))
@@ -461,7 +461,7 @@ impl EndPoint for CreateRelation {
 //FIXME text use lang
 fn relation_link(relation: Ref<Relation>, edit_state: &EditState) -> Markup {
     html! {
-        a href=(DisplayElement::url(relation.index(), edit_state)) class="relation" {
+        a.relation href=(DisplayElement::url(relation.index(), edit_state)) {
             "Element " (relation.index())
         }
     }
@@ -554,12 +554,12 @@ fn navigation_links(edit_state: &EditState, displayed: Option<Index>) -> Markup 
     html! {
         a href=(Homepage::url(edit_state)) { (lang::HOMEPAGE) }
         a href=(ListAllElements::url(edit_state)) { (lang::ALL_ELEMENTS_NAV) }
-        a href=(CreateAtom::url(edit_state)) class="atom" { (lang::CREATE_ATOM_NAV) }
-        a href=(CreateAbstract::url(edit_state)) class="abstract" { (lang::CREATE_ABSTRACT_NAV) }
+        a.atom href=(CreateAtom::url(edit_state)) { (lang::CREATE_ATOM_NAV) }
+        a.abstract href=(CreateAbstract::url(edit_state)) { (lang::CREATE_ABSTRACT_NAV) }
         (selection_nav_link(lang::RELATION_SUBJECT, displayed, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e }))
         (selection_nav_link(lang::RELATION_DESCRIPTOR, displayed, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e }))
         (selection_nav_link(lang::RELATION_COMPLEMENT, displayed, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e }))
-        a href=(CreateRelation::url(edit_state)) class="relation" { (lang::CREATE_RELATION_NAV) }
+        a.relation href=(CreateRelation::url(edit_state)) { (lang::CREATE_RELATION_NAV) }
     }
 }
 fn selection_nav_link<IFV, WFV>(
@@ -577,17 +577,17 @@ where
         @match (init_field_value(edit_state), displayed) {
             (None, None) => {},
             (None, Some(displayed)) => {
-                a href=(DisplayElement::url(displayed, &with_field_value(edit_state, Some(displayed)))) class="relation" {
+                a.relation href=(DisplayElement::url(displayed, &with_field_value(edit_state, Some(displayed)))) {
                     "+ " (field_text)
                 }
             },
             (Some(selected), Some(displayed)) if selected == displayed => {
-                a href=(DisplayElement::url(displayed, &with_field_value(edit_state, None))) class="relation" {
+                a.relation href=(DisplayElement::url(displayed, &with_field_value(edit_state, None))) {
                     "- " (field_text) ": " (displayed)
                 }
             }
             (Some(selected), _) => {
-                a href=(DisplayElement::url(selected, edit_state)) class="relation" {
+                a.relation href=(DisplayElement::url(selected, edit_state)) {
                     (field_text) ": " (selected)
                 }
             }
