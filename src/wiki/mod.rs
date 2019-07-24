@@ -13,7 +13,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
-use web::{self, remove_prefix, EndPoint, FromRequestError, FromRequestOk};
+
+/// Mini web framework.
+mod web;
+use self::web::{remove_prefix, EndPoint, FromRequestError, FromRequestOk};
 
 /******************************************************************************
  * Wiki runtime system.
@@ -722,11 +725,11 @@ const ASSETS: [AssetDefinition; 2] = [
     AssetDefinition {
         path: "style.css",
         mime: "text/css; charset=utf8",
-        content: include_str!("wiki_assets/style.css"),
+        content: include_str!("assets/style.css"),
     },
     AssetDefinition {
         path: "client.js",
         mime: "application/javascript",
-        content: include_str!("wiki_assets/client.js"),
+        content: include_str!("assets/client.js"),
     },
 ];

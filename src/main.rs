@@ -14,14 +14,12 @@ extern crate clap; // Command line parser
 mod relations;
 use relations::Database;
 
-/// Web related utilities, used to build wiki interface
-mod web;
-
 /// Wiki interface
 mod wiki;
 use std::fs::File;
 use std::io;
 use std::path::Path;
+use std::time::Duration;
 
 fn read_database_from_file(filename: &Path) -> Database {
     match File::open(filename) {
@@ -111,7 +109,7 @@ fn main() -> Result<(), String> {
                     ))
                 }
             };
-            let autosave_duration = std::time::Duration::from_secs(minutes * 60);
+            let autosave_duration = Duration::from_secs(minutes * 60);
 
             wiki::run(&addr, database_filepath, autosave_duration)
         }
