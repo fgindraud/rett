@@ -60,16 +60,15 @@ pub fn run(
         .map_err(|e| e.to_string());
 
     let database_autosave = timer::Interval::new_interval(autosave_interval)
-        .for_each(|_instant| Ok(state.write_to_file()))
-        .map_err(|e| e.to_string());
+        .for_each({
+            let state = state.clone();
+            move |_instant| Ok(state.write_to_file())
+        })
+        .map_err(|_| ());
 
-    // Stop when the first future finishes (usually wiki through ^C)
-    let program = Future::select(wiki, database_autosave).then(|r| match r {
-        // select() returns the other future: ditch it.
-        Ok(((), _)) => Ok(()),
-        Err((e, _)) => Err(e),
-    });
-    current_thread::block_on_all(program)?;
+    let mut runtime = current_thread::Runtime::new().map_err(|e| e.to_string())?;
+    runtime.spawn(database_autosave); // Background autosave
+    runtime.block_on(wiki)?; // Stop runtime when wiki terminates
     state.write_to_file();
     Ok(())
 }
