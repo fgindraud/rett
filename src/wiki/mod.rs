@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
+use relations::{Abstract, Atom, Database, Element, ElementRef, Index, Ref, Relation};
 
 /// Mini web framework.
 mod web;
@@ -169,22 +169,23 @@ impl EndPoint for DisplayElement {
 }
 fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -> String {
     let name = html! { (element_name(element)) };
+    let title = html! { (lang::ELEMENT) " " (element.index()) };
     let content = html! {
         h1 class=(css_class_name(element)) { (name) }
-        ul {
-            @ for relation in element.subject_of().iter() {
-                li { (relation_link(relation, edit_state)) }
-            }
-            @ for relation in element.descriptor_of().iter() {
-                li { (relation_link(relation, edit_state)) }
-            }
-            @ for relation in element.complement_of().iter() {
-                li { (relation_link(relation, edit_state)) }
+        @match element.cases() {
+            ElementRef::Abstract(_) => {},
+            ElementRef::Atom(atom) => @match atom.value() {
+                Atom::Text(s) => p { (s) }
+            },
+            ElementRef::Relation(relation) => p {
+                (element_link(relation.subject(), edit_state)) " " (element_link(relation.descriptor(), edit_state))
+                @if let Some(complement) = relation.complement() { " " (element_link(complement, edit_state)) }
             }
         }
+        h2 { a href="toto" { "Blah" } " blah" }
     };
-    let nav = navigation_links(edit_state, Some(element.index()));
-    compose_wiki_page(name, content, nav)
+    let nav = navigation_links(edit_state, Some(element));
+    compose_wiki_page(title, content, nav)
 }
 
 /// Homepage : links to selected elements.
@@ -504,14 +505,42 @@ impl EndPoint for CreateRelation {
     }
 }
 
-//FIXME text use lang
-fn relation_link(relation: Ref<Relation>, edit_state: &EditState) -> Markup {
+/// Relation{s d c indexes}, no recursion, link to relation itself.
+fn short_relation_link(relation: Ref<Relation>, edit_state: &EditState) -> Markup {
+    let value = relation.value();
     html! {
         a.relation href=(DisplayElement::url(relation.index(), edit_state)) {
-            "Element " (relation.index())
+            (lang::RELATION) "{" (value.subject) " " (value.descriptor)
+            @if let Some(complement) = value.complement { " " (complement) }
+            "}"
         }
     }
 }
+/// Relation content as 3 links.
+fn detailed_relation_link(relation: Ref<Relation>) {}
+
+fn atom_name(r: Ref<Atom>) -> String {
+    match r.value() {
+        Atom::Text(s) => s.to_string(),
+    }
+}
+fn abstract_name(r: Ref<Abstract>) -> String {
+    // Use first found naming relation for name if present
+    if let Some(named) = r.database().index_of_text_atom(lang::NAMED_ATOM) {
+        let maybe_name = r.subject_of().iter().find_map(|r| {
+            if r.descriptor().index() == named {
+                r.complement()
+            } else {
+                None
+            }
+        });
+        if let Some(name) = maybe_name {
+            return element_name(name);
+        }
+    }
+    format!("Abstrait({})", r.index())
+}
+
 fn element_link(element: Ref<Element>, edit_state: &EditState) -> Markup {
     html! {
         a href=(DisplayElement::url(element.index(), edit_state)) class=(css_class_name(element)) {
@@ -521,26 +550,8 @@ fn element_link(element: Ref<Element>, edit_state: &EditState) -> Markup {
 }
 fn element_name(element: Ref<Element>) -> String {
     match element.cases() {
-        ElementRef::Atom(r) => match r.value() {
-            Atom::Text(s) => s.clone(),
-        },
-        ElementRef::Abstract(r) => {
-            if let Some(is_named_atom_index) =
-                element.database().index_of_text_atom(lang::NAMED_ATOM)
-            {
-                let name = r.subject_of().iter().find_map(|r| {
-                    if r.descriptor().index() == is_named_atom_index {
-                        r.complement()
-                    } else {
-                        None
-                    }
-                });
-                if let Some(name) = name {
-                    return element_name(name);
-                }
-            }
-            format!("Abstrait_{}", element.index())
-        }
+        ElementRef::Atom(r) => atom_name(r),
+        ElementRef::Abstract(r) => abstract_name(r),
         ElementRef::Relation(r) => {
             // TODO naming of (s,d,c) without relation recursion
             let r = r.value();
@@ -572,6 +583,9 @@ mod lang {
     pub const PREVIEW_BUTTON: ConstStr = PreEscaped("Prévisualiser");
     pub const INVALID_ELEMENT_INDEX: ConstStr = PreEscaped("Index invalide");
 
+    pub const ELEMENT: ConstStr = PreEscaped("Élément");
+    pub const RELATION: ConstStr = PreEscaped("Relation");
+
     pub const HOMEPAGE: ConstStr = PreEscaped("Accueil");
     pub const HOMEPAGE_HELP: ConstStr =
         PreEscaped("Pour lister un élément sur cette page, il doit être taggé par _wiki_homepage.");
@@ -596,7 +610,8 @@ mod lang {
 }
 
 /// Generates sequence of navigation links depending on state.
-fn navigation_links(edit_state: &EditState, displayed: Option<Index>) -> Markup {
+fn navigation_links(edit_state: &EditState, displayed: Option<Ref<Element>>) -> Markup {
+    let displayed = displayed.map(|r| r.index());
     html! {
         a href=(Homepage::url(edit_state)) { (lang::HOMEPAGE) }
         a href=(ListAllElements::url(edit_state)) { (lang::ALL_ELEMENTS_NAV) }
@@ -708,7 +723,7 @@ impl EndPoint for StaticAsset {
             Some(asset) => Response::builder()
                 .status(StatusCode::OK)
                 .header(hyper::header::CONTENT_TYPE, asset.mime)
-                .header(hyper::header::CACHE_CONTROL, "public, max-age=3600") // Allow cache for 1h
+                //.header(hyper::header::CACHE_CONTROL, "public, max-age=3600") // Allow cache for 1h
                 .body(Body::from(asset.content))
                 .unwrap(),
             None => web::response_empty_404(),

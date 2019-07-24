@@ -31,7 +31,7 @@ nav {
 }
 main {
 	flex-grow: 1;
-	margin: 0.2em;
+	margin: 0.1em;
 }
 
 /* Navigation bar of vertically stacked boxes, stuck to the upper left side.
@@ -44,7 +44,7 @@ nav {
 }
 nav a {
 	display: block;
-	padding: 0.5em !important; /* Force override of padding in a.object_type */
+	padding: 0.5em 0.2em !important; /* Force override of padding in a.object_type */
 	color: blue;
 	text-decoration: none;
 	border-top: 1px solid grey;
@@ -92,7 +92,7 @@ table {
 	width: 100%;
 }
 td {
-	padding: 5px;
+	padding: 1px;
 }
 
 .error {
