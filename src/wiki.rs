@@ -1,9 +1,10 @@
-use hyper::rt::{Future, Stream};
 use hyper::service::service_fn;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use maud::{html, Markup, PreEscaped};
 use signal_hook::{self, iterator::Signals};
+use tokio::prelude::{Future, Stream};
 use tokio::runtime::current_thread;
+use tokio::timer;
 
 use std::cell;
 use std::net::SocketAddr;
@@ -18,6 +19,57 @@ use web::{self, remove_prefix, EndPoint, FromRequestError, FromRequestOk};
  * Wiki runtime system.
  * Based on hyper/tokio, but uses the single threaded tokio runtime.
  */
+
+/// Entry point, run the wiki server.
+pub fn run(
+    addr: &SocketAddr,
+    database_file: &Path,
+    autosave_interval: Duration,
+) -> Result<(), String> {
+    let state = Rc::new(State::from_file(database_file));
+
+    let create_service = || {
+        let state = state.clone();
+        service_fn(move |request| {
+            // Move cloned rc ref in this scope.
+            let handlers = [
+                web::end_point_handler::<Homepage>,
+                web::end_point_handler::<ListAllElements>,
+                web::end_point_handler::<DisplayElement>,
+                web::end_point_handler::<CreateAtom>,
+                web::end_point_handler::<CreateAbstract>,
+                web::end_point_handler::<CreateRelation>,
+                web::end_point_handler::<StaticAsset>,
+            ];
+            web::handle_request(request, state.clone(), handlers.iter())
+        })
+    };
+    let server = Server::bind(&addr)
+        .executor(current_thread::TaskExecutor::current())
+        .serve(create_service);
+    let shutdown_signal = Signals::new(&[signal_hook::SIGTERM, signal_hook::SIGINT])
+        .map_err(|e| e.to_string())?
+        .into_async() // Stream of signals
+        .map_err(|e| e.to_string())?
+        .into_future(); // Only look at first signal
+    let wiki = server
+        .with_graceful_shutdown(shutdown_signal.map(|_| ()))
+        .map_err(|e| e.to_string());
+
+    let database_autosave = timer::Interval::new_interval(autosave_interval)
+        .for_each(|_instant| Ok(state.write_to_file()))
+        .map_err(|e| e.to_string());
+
+    // Stop when the first future finishes (usually wiki through ^C)
+    let program = Future::select(wiki, database_autosave).then(|r| match r {
+        // select() returns the other future: ditch it.
+        Ok(((), _)) => Ok(()),
+        Err((e, _)) => Err(e),
+    });
+    current_thread::block_on_all(program)?;
+    state.write_to_file();
+    Ok(())
+}
 
 /// Wiki web interface state.
 struct State {
@@ -57,58 +109,10 @@ impl State {
     }
 }
 
-/// Entry point, run the wiki server.
-pub fn run(
-    addr: &SocketAddr,
-    database_file: &Path,
-    autosave_interval: Duration,
-) -> Result<(), String> {
-    let state = Rc::new(State::from_file(database_file));
-
-    let create_service = || {
-        let state = state.clone();
-        service_fn(move |request| {
-            // Move cloned rc ref in this scope.
-            let handlers = [
-                web::end_point_handler::<Homepage>,
-                web::end_point_handler::<ListAllElements>,
-                web::end_point_handler::<DisplayElement>,
-                web::end_point_handler::<CreateAtom>,
-                web::end_point_handler::<CreateAbstract>,
-                web::end_point_handler::<CreateRelation>,
-                web::end_point_handler::<StaticAsset>,
-            ];
-            web::handle_request(request, state.clone(), handlers.iter())
-        })
-    };
-    let server = Server::bind(&addr)
-        .executor(current_thread::TaskExecutor::current())
-        .serve(create_service);
-
-    let shutdown_signal = Signals::new(&[signal_hook::SIGTERM, signal_hook::SIGINT])
-        .map_err(|e| e.to_string())?
-        .into_async() // Stream of signals
-        .map_err(|e| e.to_string())?
-        .into_future(); // Only look at first signal
-
-    let wiki = server.with_graceful_shutdown(shutdown_signal.map(|_| ()));
-    current_thread::block_on_all(wiki).map_err(|e| e.to_string())?;
-    state.write_to_file();
-    Ok(())
-}
-
 /******************************************************************************
  * Wiki page definitions.
  */
 
-/* Link creation:
- * buttons to start creating a link from/to a normal display page.
- * cancel + build button if all requirements are filled
- *
- * Removal TODO
- */
-
-// TODO copy for convenience with url generation. should be reworked one day
 #[derive(Clone, Default)]
 struct EditState {
     // Relation
