@@ -1,8 +1,8 @@
 #![feature(proc_macro_hygiene)]
 
 // Wiki
-extern crate maud; // HTML template engine
 extern crate hyper;
+extern crate maud; // HTML template engine
 extern crate percent_encoding;
 extern crate signal_hook;
 extern crate tokio;
@@ -61,7 +61,7 @@ fn write_database_to_file(filename: &Path, database: &Database) {
     }
 }
 
-fn main() {
+fn main() -> Result<(), String> {
     use clap::{AppSettings, Arg, SubCommand};
     let matches = app_from_crate!()
         .setting(AppSettings::VersionlessSubcommands)
@@ -77,7 +77,14 @@ fn main() {
                 .arg(
                     Arg::with_name("addr")
                         .help("Address on which the server will bind")
-                        .default_value("127.0.0.1:8000"),
+                        .default_value("0.0.0.0:8000"),
+                )
+                .arg(
+                    Arg::with_name("autosave")
+                        .help("Interval (in minutes) between writing the database to disk")
+                        .long("autosave")
+                        .value_name("interval")
+                        .default_value("10"),
                 ),
         )
         .get_matches();
@@ -89,8 +96,20 @@ fn main() {
     match matches.subcommand() {
         ("wiki", Some(args)) => {
             let addr = args.value_of("addr").unwrap();
-            wiki::run(addr, database_filepath)
+            let addr = match addr.parse() {
+                Ok(addr) => addr,
+                _ => return Err(format!("Unable to parse address: {}", addr))
+            };
+
+            let autosave_duration = args.value_of("autosave").unwrap();
+            let minutes : u64 = match autosave_duration.parse() {
+                Ok(minutes) if minutes > 0 => minutes,
+                _ => return Err(format!("Unable to parse positive number for autosave interval: {}", autosave_duration))
+            };
+            let autosave_duration = std::time::Duration::from_secs(minutes * 60);
+
+            wiki::run(&addr, database_filepath, autosave_duration)
         }
-        _ => panic!("Missing subcommand"),
+        _ => Err("Missing subcommand".into()),
     }
 }

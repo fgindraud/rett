@@ -6,8 +6,10 @@ use signal_hook::{self, iterator::Signals};
 use tokio::runtime::current_thread;
 
 use std::cell::RefCell;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 use relations::{Atom, Database, Element, ElementRef, Index, Ref, Relation};
 use web::{self, remove_prefix, EndPoint, FromRequestError, FromRequestOk};
@@ -23,9 +25,7 @@ struct State {
 }
 
 /// Entry point, run the wiki server.
-pub fn run(addr: &str, database_file: &Path) {
-    let addr = addr.parse().expect("Address::parse");
-
+pub fn run(addr: &SocketAddr, database_file: &Path, autosave_interval: Duration) -> Result<(), String> {
     let database = super::read_database_from_file(database_file);
     let state = Rc::new(State {
         database: RefCell::new(database),
@@ -61,6 +61,7 @@ pub fn run(addr: &str, database_file: &Path) {
     current_thread::block_on_all(wiki).expect("Runtime error");
     super::write_database_to_file(database_file, &state.database.borrow());
     eprintln!("Database saved to {}", database_file.display());
+    Ok(())
 }
 
 /******************************************************************************
