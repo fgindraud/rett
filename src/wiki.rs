@@ -5,9 +5,9 @@ use maud::{html, Markup, PreEscaped};
 use signal_hook::{self, iterator::Signals};
 use tokio::runtime::current_thread;
 
-use std::cell::RefCell;
+use std::cell;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -21,15 +21,49 @@ use web::{self, remove_prefix, EndPoint, FromRequestError, FromRequestOk};
 
 /// Wiki web interface state.
 struct State {
-    database: RefCell<Database>,
+    mutable: cell::RefCell<InnerMutableState>,
+    database_file: PathBuf,
+}
+struct InnerMutableState {
+    database: Database,
+    modified_since_last_write: bool,
+}
+impl State {
+    fn from_file(database_file: &Path) -> Self {
+        State {
+            mutable: cell::RefCell::new(InnerMutableState {
+                database: super::read_database_from_file(database_file),
+                modified_since_last_write: false,
+            }),
+            database_file: database_file.to_owned(),
+        }
+    }
+    fn write_to_file(&self) {
+        // TODO backup old
+        let inner = &mut self.mutable.borrow_mut();
+        if inner.modified_since_last_write {
+            inner.modified_since_last_write = false;
+            super::write_database_to_file(&self.database_file, &inner.database);
+            eprintln!("Database saved to {}", &self.database_file.display())
+        }
+    }
+    fn get(&self) -> cell::Ref<Database> {
+        cell::Ref::map(self.mutable.borrow(), |s| &s.database)
+    }
+    fn get_mut(&self) -> cell::RefMut<Database> {
+        let mut inner = self.mutable.borrow_mut();
+        inner.modified_since_last_write = true;
+        cell::RefMut::map(inner, |s| &mut s.database)
+    }
 }
 
 /// Entry point, run the wiki server.
-pub fn run(addr: &SocketAddr, database_file: &Path, autosave_interval: Duration) -> Result<(), String> {
-    let database = super::read_database_from_file(database_file);
-    let state = Rc::new(State {
-        database: RefCell::new(database),
-    });
+pub fn run(
+    addr: &SocketAddr,
+    database_file: &Path,
+    autosave_interval: Duration,
+) -> Result<(), String> {
+    let state = Rc::new(State::from_file(database_file));
 
     let create_service = || {
         let state = state.clone();
@@ -52,15 +86,14 @@ pub fn run(addr: &SocketAddr, database_file: &Path, autosave_interval: Duration)
         .serve(create_service);
 
     let shutdown_signal = Signals::new(&[signal_hook::SIGTERM, signal_hook::SIGINT])
-        .expect("Signal handler setup")
+        .map_err(|e| e.to_string())?
         .into_async() // Stream of signals
-        .expect("Signal handler to async")
+        .map_err(|e| e.to_string())?
         .into_future(); // Only look at first signal
 
     let wiki = server.with_graceful_shutdown(shutdown_signal.map(|_| ()));
-    current_thread::block_on_all(wiki).expect("Runtime error");
-    super::write_database_to_file(database_file, &state.database.borrow());
-    eprintln!("Database saved to {}", database_file.display());
+    current_thread::block_on_all(wiki).map_err(|e| e.to_string())?;
+    state.write_to_file();
     Ok(())
 }
 
@@ -120,7 +153,7 @@ impl EndPoint for DisplayElement {
         }
     }
     fn generate_response(self, state: &State) -> Response<Body> {
-        match state.database.borrow().element(self.index) {
+        match state.get().element(self.index) {
             Ok(element) => {
                 web::response_html(display_element_page_content(element, &self.edit_state))
             }
@@ -168,7 +201,7 @@ impl EndPoint for Homepage {
         }
     }
     fn generate_response(self, state: &State) -> Response<Body> {
-        let database = &state.database.borrow();
+        let database = state.get();
         let content = html! {
             h1 { (lang::HOMEPAGE) }
             @ if let Some(wiki_homepage) = database.get_text_atom("_wiki_homepage") {
@@ -214,7 +247,7 @@ impl EndPoint for ListAllElements {
         }
     }
     fn generate_response(self, state: &State) -> Response<Body> {
-        let database = &state.database.borrow();
+        let database = state.get();
         let content = html! {
             h1 { (lang::ALL_ELEMENTS_TITLE) }
             @ for element in database.iter() {
@@ -278,7 +311,7 @@ impl EndPoint for CreateAtom {
                 web::response_html(page)
             }
             CreateAtom::Post { text, edit_state } => {
-                let index = state.database.borrow_mut().insert_atom(Atom::from(text));
+                let index = state.get_mut().insert_atom(Atom::from(text));
                 web::response_redirection(&DisplayElement::url(index, &edit_state))
             }
         }
@@ -339,7 +372,7 @@ impl EndPoint for CreateAbstract {
                 web::response_html(page)
             }
             CreateAbstract::Post { name, edit_state } => {
-                let database = &mut state.database.borrow_mut();
+                let database = &mut state.get_mut();
                 let index = database.create_abstract_element();
                 if let Some(name) = name {
                     let name_element = database.insert_atom(Atom::from(name));
@@ -399,9 +432,10 @@ impl EndPoint for CreateRelation {
     fn generate_response(self, state: &State) -> Response<Body> {
         match self {
             CreateRelation::Get { edit_state } => {
-                let state = &state.database.borrow();
+                let database = state.get();
                 let enable_form = {
-                    let valid_or = |i: Option<Index>, d| i.map_or(d, |i| state.element(i).is_ok());
+                    let valid_or =
+                        |i: Option<Index>, d| i.map_or(d, |i| database.element(i).is_ok());
                     valid_or(edit_state.subject, false)
                         && valid_or(edit_state.descriptor, false)
                         && valid_or(edit_state.complement, true)
@@ -418,7 +452,7 @@ impl EndPoint for CreateRelation {
                                     true => { td; },
                                     false => { td.error { (lang::CREATE_RELATION_MISSING) } },
                                 },
-                                Some(index) => @match state.element(index) {
+                                Some(index) => @match database.element(index) {
                                     Ok(element) => { td { (element_link(element, &edit_state)) } },
                                     Err(_) => { td.error { (lang::INVALID_ELEMENT_INDEX) ": " (index) } }
                                 }
@@ -454,7 +488,7 @@ impl EndPoint for CreateRelation {
                 relation,
                 edit_state,
             } => {
-                let insertion = state.database.borrow_mut().insert_relation(relation);
+                let insertion = state.get_mut().insert_relation(relation);
                 web::response_redirection(&match insertion {
                     Ok(index) => DisplayElement::url(index, &EditState::default()),
                     Err(_) => CreateRelation::url(&edit_state), // Allow retrying

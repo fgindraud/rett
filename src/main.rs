@@ -98,13 +98,18 @@ fn main() -> Result<(), String> {
             let addr = args.value_of("addr").unwrap();
             let addr = match addr.parse() {
                 Ok(addr) => addr,
-                _ => return Err(format!("Unable to parse address: {}", addr))
+                _ => return Err(format!("Unable to parse address: {}", addr)),
             };
 
             let autosave_duration = args.value_of("autosave").unwrap();
-            let minutes : u64 = match autosave_duration.parse() {
+            let minutes: u64 = match autosave_duration.parse() {
                 Ok(minutes) if minutes > 0 => minutes,
-                _ => return Err(format!("Unable to parse positive number for autosave interval: {}", autosave_duration))
+                _ => {
+                    return Err(format!(
+                        "Unable to parse positive number for autosave interval: {}",
+                        autosave_duration
+                    ))
+                }
             };
             let autosave_duration = std::time::Duration::from_secs(minutes * 60);
 
