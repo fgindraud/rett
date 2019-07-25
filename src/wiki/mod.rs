@@ -168,21 +168,29 @@ impl EndPoint for DisplayElement {
     }
 }
 fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -> String {
-    let name = html! { (element_name(element)) };
-    let title = html! { (lang::ELEMENT) " " (element.index()) };
+    let basic_name = html! {
+        (match element.value() {
+            Element::Abstract => lang::ABSTRACT,
+            Element::Atom(_) => lang::ATOM,
+            Element::Relation(_) => lang::RELATION,
+        }) "#" (element.index())
+    };
+    let name = element_name(element, 1);
+    let title = html! { (basic_name) " - " (name) };
     let content = html! {
         h1 class=(css_class_name(element)) { (name) }
-        @match element.cases() {
-            ElementRef::Abstract(_) => {},
-            ElementRef::Atom(atom) => @match atom.value() {
-                Atom::Text(s) => p { (s) }
-            },
-            ElementRef::Relation(relation) => p {
-                (element_link(relation.subject(), edit_state)) " " (element_link(relation.descriptor(), edit_state))
-                @if let Some(complement) = relation.complement() { " " (element_link(complement, edit_state)) }
+        p {
+            (basic_name)
+            @match element.cases() {
+                ElementRef::Abstract(r) => @if let Some(r) = naming_atom(r) { ": " (atom_link(r, edit_state)) },
+                ElementRef::Atom(r) => ": " (atom_name(r)),
+                ElementRef::Relation(r) => {
+                    br;
+                    (element_link(r.subject(), edit_state)) " " (element_link(r.descriptor(), edit_state))
+                    @if let Some(complement) = r.complement() { " " (element_link(complement, edit_state)) }
+                }
             }
         }
-        h2 { a href="toto" { "Blah" } " blah" }
     };
     let nav = navigation_links(edit_state, Some(element));
     compose_wiki_page(title, content, nav)
@@ -215,9 +223,7 @@ impl EndPoint for Homepage {
                 ul {
                     @ for tagged in wiki_homepage.descriptor_of().iter().map(|tag_relation| tag_relation.subject()) {
                         li {
-                            a href=(DisplayElement::url(tagged.index(), &self.edit_state)) class=(css_class_name(tagged)) {
-                                (tagged.index()) " " (element_name(tagged))
-                            }
+                            (element_link(tagged, &self.edit_state))
                         }
                     }
                 }
@@ -258,11 +264,7 @@ impl EndPoint for ListAllElements {
         let content = html! {
             h1 { (lang::ALL_ELEMENTS_TITLE) }
             @ for element in database.iter() {
-                p {
-                    a href=(DisplayElement::url(element.index(), &self.edit_state)) class=(css_class_name(element)) {
-                        (element.index()) " " (element_name(element))
-                    }
-                }
+                p { (element_link(element, &self.edit_state)) }
             }
         };
         let nav = navigation_links(&self.edit_state, None);
@@ -505,71 +507,6 @@ impl EndPoint for CreateRelation {
     }
 }
 
-/// Relation{s d c indexes}, no recursion, link to relation itself.
-fn short_relation_link(relation: Ref<Relation>, edit_state: &EditState) -> Markup {
-    let value = relation.value();
-    html! {
-        a.relation href=(DisplayElement::url(relation.index(), edit_state)) {
-            (lang::RELATION) "{" (value.subject) " " (value.descriptor)
-            @if let Some(complement) = value.complement { " " (complement) }
-            "}"
-        }
-    }
-}
-/// Relation content as 3 links.
-fn detailed_relation_link(relation: Ref<Relation>) {}
-
-fn atom_name(r: Ref<Atom>) -> String {
-    match r.value() {
-        Atom::Text(s) => s.to_string(),
-    }
-}
-fn abstract_name(r: Ref<Abstract>) -> String {
-    // Use first found naming relation for name if present
-    if let Some(named) = r.database().index_of_text_atom(lang::NAMED_ATOM) {
-        let maybe_name = r.subject_of().iter().find_map(|r| {
-            if r.descriptor().index() == named {
-                r.complement()
-            } else {
-                None
-            }
-        });
-        if let Some(name) = maybe_name {
-            return element_name(name);
-        }
-    }
-    format!("Abstrait({})", r.index())
-}
-
-fn element_link(element: Ref<Element>, edit_state: &EditState) -> Markup {
-    html! {
-        a href=(DisplayElement::url(element.index(), edit_state)) class=(css_class_name(element)) {
-            (element_name(element))
-        }
-    }
-}
-fn element_name(element: Ref<Element>) -> String {
-    match element.cases() {
-        ElementRef::Atom(r) => atom_name(r),
-        ElementRef::Abstract(r) => abstract_name(r),
-        ElementRef::Relation(r) => {
-            // TODO naming of (s,d,c) without relation recursion
-            let r = r.value();
-            match r.complement {
-                Some(c) => format!("Relation: {} {} {}", r.subject, r.descriptor, c),
-                None => format!("Relation {} {}", r.subject, r.descriptor),
-            }
-        }
-    }
-}
-fn css_class_name(element: Ref<Element>) -> &'static str {
-    match element.value() {
-        Element::Abstract => "abstract",
-        Element::Atom(_) => "atom",
-        Element::Relation(_) => "relation",
-    }
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 /// Language specific configuration.
 /// Contains text constants.
@@ -583,8 +520,9 @@ mod lang {
     pub const PREVIEW_BUTTON: ConstStr = PreEscaped("Prévisualiser");
     pub const INVALID_ELEMENT_INDEX: ConstStr = PreEscaped("Index invalide");
 
-    pub const ELEMENT: ConstStr = PreEscaped("Élément");
     pub const RELATION: ConstStr = PreEscaped("Relation");
+    pub const ATOM: ConstStr = PreEscaped("Atome");
+    pub const ABSTRACT: ConstStr = PreEscaped("Abstrait");
 
     pub const HOMEPAGE: ConstStr = PreEscaped("Accueil");
     pub const HOMEPAGE_HELP: ConstStr =
@@ -607,6 +545,90 @@ mod lang {
     pub const CREATE_RELATION_NAV: ConstStr = PreEscaped("Relation...");
     pub const CREATE_RELATION_TITLE: ConstStr = PreEscaped("Ajouter une relation...");
     pub const CREATE_RELATION_MISSING: ConstStr = PreEscaped("Champ manquant !");
+}
+
+fn css_class_name(element: Ref<Element>) -> &'static str {
+    match element.value() {
+        Element::Abstract => "abstract",
+        Element::Atom(_) => "atom",
+        Element::Relation(_) => "relation",
+    }
+}
+
+/// Atom default representation: with its text.
+fn atom_name(r: Ref<Atom>) -> Markup {
+    match r.value() {
+        Atom::Text(s) => html! { (s) },
+    }
+}
+/// Abstract default representation: find a naming atom, or use index.
+fn abstract_name(r: Ref<Abstract>) -> Markup {
+    match naming_atom(r) {
+        Some(r) => atom_name(r),
+        None => html! { (lang::ABSTRACT) "#" (r.index()) },
+    }
+}
+fn naming_atom(r: Ref<Abstract>) -> Option<Ref<Atom>> {
+    r.database()
+        .index_of_text_atom(lang::NAMED_ATOM)
+        .and_then(|is_named| {
+            r.subject_of().iter().find_map(|r| {
+                // Search for first naming relation, restricted to atom names
+                if r.descriptor().index() == is_named {
+                    r.complement().and_then(|r| match r.cases() {
+                        ElementRef::Atom(r) => Some(r),
+                        _ => None,
+                    })
+                } else {
+                    None
+                }
+            })
+        })
+}
+/// Relation representation: index, or components recursively.
+fn relation_name(r: Ref<Relation>, depth: u64) -> Markup {
+    if depth > 0 {
+        let element_name_nested = |r: Ref<Element>| -> Markup {
+            match r.cases() {
+                ElementRef::Atom(r) => atom_name(r),
+                ElementRef::Abstract(r) => abstract_name(r),
+                ElementRef::Relation(r) => {
+                    let depth = depth - 1;
+                    if depth > 0 {
+                        html! { "(" (relation_name(r, depth)) ")" }
+                    } else {
+                        relation_name(r, depth)
+                    }
+                }
+            }
+        };
+        html! {
+            (element_name_nested(r.subject())) " " (element_name_nested(r.descriptor()))
+            @if let Some(complement) = r.complement() { " " (element_name_nested(complement)) }
+        }
+    } else {
+        html! { (lang::RELATION) "#" (r.index()) }
+    }
+}
+fn element_name(r: Ref<Element>, depth: u64) -> Markup {
+    match r.cases() {
+        ElementRef::Atom(r) => atom_name(r),
+        ElementRef::Abstract(r) => abstract_name(r),
+        ElementRef::Relation(r) => relation_name(r, depth),
+    }
+}
+
+fn atom_link(r:Ref<Atom>, edit_state: &EditState) -> Markup {
+    html! {
+        a.atom href=(DisplayElement::url(r.index(), edit_state)) { (atom_name(r)) }
+    }
+}
+fn element_link(r: Ref<Element>, edit_state: &EditState) -> Markup {
+    html! {
+        a href=(DisplayElement::url(r.index(), edit_state)) class=(css_class_name(r)) {
+            (element_name(r, 1))
+        }
+    }
 }
 
 /// Generates sequence of navigation links depending on state.
@@ -639,21 +661,21 @@ where
             (None, None) => {},
             (Some(selected), Some(displayed)) => @if selected == displayed {
                 a.relation href=(DisplayElement::url(displayed, &with_field_value(edit_state, None))) {
-                    "- " (field_text) ": " (selected)
+                    "-" (field_text) " #" (selected)
                 }
             } @else {
                 a.relation href=(DisplayElement::url(displayed, &with_field_value(edit_state, Some(displayed)))) {
-                    "= " (field_text) ": " (selected)
+                    "=" (field_text) " #" (selected)
                 }
             },
             (None, Some(displayed)) => {
                 a.relation href=(DisplayElement::url(displayed, &with_field_value(edit_state, Some(displayed)))) {
-                    "+ " (field_text)
+                    "+" (field_text)
                 }
             },
             (Some(selected), None) => {
                 a.relation href=(DisplayElement::url(selected, edit_state)) {
-                    (field_text) ": " (selected)
+                    (field_text) " #" (selected)
                 }
             }
         }
@@ -723,7 +745,7 @@ impl EndPoint for StaticAsset {
             Some(asset) => Response::builder()
                 .status(StatusCode::OK)
                 .header(hyper::header::CONTENT_TYPE, asset.mime)
-                //.header(hyper::header::CACHE_CONTROL, "public, max-age=3600") // Allow cache for 1h
+                .header(hyper::header::CACHE_CONTROL, "public, max-age=3600") // Allow cache for 1h
                 .body(Body::from(asset.content))
                 .unwrap(),
             None => web::response_empty_404(),
