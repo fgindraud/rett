@@ -31,7 +31,7 @@ nav {
 }
 main {
 	flex-grow: 1;
-	margin: 0.1em;
+	margin: 1px;
 }
 
 /* Navigation bar of vertically stacked boxes, stuck to the upper left side.
@@ -93,6 +93,16 @@ table {
 }
 td {
 	padding: 1px;
+}
+
+/* Compact lists */
+ul {
+	list-style: square;
+	padding: 0 0 0 20px;
+	margin: 0;
+}
+ul > li {
+	margin: 1px;
 }
 
 .error {
