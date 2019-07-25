@@ -160,14 +160,12 @@ impl EndPoint for DisplayElement {
     }
     fn generate_response(self, state: &State) -> Response<Body> {
         match state.get().element(self.index) {
-            Ok(element) => {
-                web::response_html(display_element_page_content(element, &self.edit_state))
-            }
+            Ok(element) => web::response_html(display_element_page(element, &self.edit_state)),
             Err(_) => web::response_empty_404(),
         }
     }
 }
-fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -> String {
+fn display_element_page(element: Ref<Element>, edit_state: &EditState) -> String {
     let basic_name = html! {
         (match element.value() {
             Element::Abstract => lang::ABSTRACT,
@@ -177,6 +175,21 @@ fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -
     };
     let name = element_name(element, 1);
     let title = html! { (basic_name) " - " (name) };
+    let descriptions = {
+        let mut v: Vec<_> =
+            Iterator::chain(element.subject_of().iter(), element.complement_of().iter()).collect();
+        v.sort_by_key(|r: &Ref<Relation>| {
+            // Group descriptions by descriptor.
+            // For the same descriptor, put element on top.
+            // This relies on None < Some(_)
+            (
+                r.descriptor().index(),
+                Some(r.subject().index()).filter(|&i| i != element.index()),
+            )
+        });
+        v
+    };
+    let descriptor_of = element.descriptor_of();
     let content = html! {
         h1 class=(css_class_name(element)) { (name) }
         p {
@@ -188,6 +201,21 @@ fn display_element_page_content(element: Ref<Element>, edit_state: &EditState) -
                     br;
                     (element_link(r.subject(), edit_state)) " " (element_link(r.descriptor(), edit_state))
                     @if let Some(complement) = r.complement() { " " (element_link(complement, edit_state)) }
+                }
+            }
+            @if descriptions.len() > 0 {
+                ul {
+                    @for d in descriptions {
+                        li { (relation_link(d, edit_state)) }
+                    }
+                }
+            }
+            @if descriptor_of.len() > 0 {
+                p { (lang::DISPLAY_DESCRIBES) ":" }
+                ul {
+                    @for d in descriptor_of.iter() {
+                        li { (relation_link(d, edit_state)) }
+                    }
                 }
             }
         }
@@ -219,12 +247,10 @@ impl EndPoint for Homepage {
         let database = state.get();
         let content = html! {
             h1 { (lang::HOMEPAGE) }
-            @ if let Some(wiki_homepage) = database.get_text_atom("_wiki_homepage") {
+            @if let Some(wiki_homepage) = database.get_text_atom("_wiki_homepage") {
                 ul {
-                    @ for tagged in wiki_homepage.descriptor_of().iter().map(|tag_relation| tag_relation.subject()) {
-                        li {
-                            (element_link(tagged, &self.edit_state))
-                        }
+                    @for tagged in wiki_homepage.descriptor_of().iter().map(|tag_relation| tag_relation.subject()) {
+                        li { (element_link(tagged, &self.edit_state)) }
                     }
                 }
             }
@@ -263,8 +289,10 @@ impl EndPoint for ListAllElements {
         let database = state.get();
         let content = html! {
             h1 { (lang::ALL_ELEMENTS_TITLE) }
-            @ for element in database.iter() {
-                p { (element_link(element, &self.edit_state)) }
+            ul {
+                @for element in database.iter() {
+                    li { (element_link(element, &self.edit_state)) }
+                }
             }
         };
         let nav = navigation_links(&self.edit_state, None);
@@ -458,12 +486,12 @@ impl EndPoint for CreateRelation {
                             td { (name) }
                             @match index {
                                 None => @match allow_missing {
-                                    true => { td; },
-                                    false => { td.error { (lang::CREATE_RELATION_MISSING) } },
+                                    true => td;,
+                                    false => td.error { (lang::CREATE_RELATION_MISSING) },
                                 },
                                 Some(index) => @match database.element(index) {
-                                    Ok(element) => { td { (element_link(element, &edit_state)) } },
-                                    Err(_) => { td.error { (lang::INVALID_ELEMENT_INDEX) ": " (index) } }
+                                    Ok(element) => td { (element_link(element, &edit_state)) },
+                                    Err(_) => td.error { (lang::INVALID_ELEMENT_INDEX) ": " (index) },
                                 }
                             }
                         }
@@ -523,6 +551,7 @@ mod lang {
     pub const RELATION: ConstStr = PreEscaped("Relation");
     pub const ATOM: ConstStr = PreEscaped("Atome");
     pub const ABSTRACT: ConstStr = PreEscaped("Abstrait");
+    pub const DISPLAY_DESCRIBES: ConstStr = PreEscaped("Décrit");
 
     pub const HOMEPAGE: ConstStr = PreEscaped("Accueil");
     pub const HOMEPAGE_HELP: ConstStr =
@@ -618,16 +647,26 @@ fn element_name(r: Ref<Element>, depth: u64) -> Markup {
     }
 }
 
-fn atom_link(r:Ref<Atom>, edit_state: &EditState) -> Markup {
+fn atom_link(r: Ref<Atom>, edit_state: &EditState) -> Markup {
     html! {
         a.atom href=(DisplayElement::url(r.index(), edit_state)) { (atom_name(r)) }
     }
 }
-fn element_link(r: Ref<Element>, edit_state: &EditState) -> Markup {
+fn abstract_link(r: Ref<Abstract>, edit_state: &EditState) -> Markup {
     html! {
-        a href=(DisplayElement::url(r.index(), edit_state)) class=(css_class_name(r)) {
-            (element_name(r, 1))
-        }
+        a.abstract href=(DisplayElement::url(r.index(), edit_state)) { (abstract_name(r)) }
+    }
+}
+fn relation_link(r: Ref<Relation>, edit_state: &EditState) -> Markup {
+    html! {
+        a.relation href=(DisplayElement::url(r.index(), edit_state)) { (relation_name(r, 1)) }
+    }
+}
+fn element_link(r: Ref<Element>, edit_state: &EditState) -> Markup {
+    match r.cases() {
+        ElementRef::Atom(r) => atom_link(r, edit_state),
+        ElementRef::Abstract(r) => abstract_link(r, edit_state),
+        ElementRef::Relation(r) => relation_link(r, edit_state),
     }
 }
 
