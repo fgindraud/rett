@@ -7,6 +7,7 @@ use tokio::runtime::current_thread;
 use tokio::timer;
 
 use std::cell;
+use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -27,9 +28,10 @@ use self::web::{remove_prefix, EndPoint, FromRequestError, FromRequestOk};
 pub fn run(
     addr: &SocketAddr,
     database_file: &Path,
+    backup_file: &Path,
     autosave_interval: Duration,
 ) -> Result<(), String> {
-    let state = Rc::new(State::from_file(database_file));
+    let state = Rc::new(State::from_file(database_file, backup_file));
 
     let create_service = || {
         let state = state.clone();
@@ -77,28 +79,30 @@ pub fn run(
 struct State {
     mutable: cell::RefCell<InnerMutableState>,
     database_file: PathBuf,
+    backup_file: PathBuf,
 }
 struct InnerMutableState {
     database: Database,
     modified_since_last_write: bool,
 }
 impl State {
-    fn from_file(database_file: &Path) -> Self {
+    fn from_file(database_file: &Path, backup_file: &Path) -> Self {
         State {
             mutable: cell::RefCell::new(InnerMutableState {
                 database: super::read_database_from_file(database_file),
                 modified_since_last_write: false,
             }),
             database_file: database_file.to_owned(),
+            backup_file: backup_file.to_owned(),
         }
     }
     fn write_to_file(&self) {
-        // TODO backup old
         let inner = &mut self.mutable.borrow_mut();
         if inner.modified_since_last_write {
             inner.modified_since_last_write = false;
+            fs::rename(&self.database_file, &self.backup_file)
+                .unwrap_or_else(|e| eprintln!("[warning] Cannot move backup: {}", e));
             super::write_database_to_file(&self.database_file, &inner.database);
-            eprintln!("Database saved to {}", &self.database_file.display())
         }
     }
     fn get(&self) -> cell::Ref<Database> {

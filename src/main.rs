@@ -16,9 +16,10 @@ use relations::Database;
 
 /// Wiki interface
 mod wiki;
+use std::borrow::Cow;
 use std::fs::File;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 fn read_database_from_file(filename: &Path) -> Database {
@@ -26,37 +27,33 @@ fn read_database_from_file(filename: &Path) -> Database {
         Ok(file) => match Database::read_from(io::BufReader::new(file)) {
             Ok(database) => return database,
             Err(e) => eprintln!(
-                "Warning: invalid database format in file {}: {}",
+                "[warning] Invalid database format in file {}: {}",
                 filename.display(),
                 e
             ),
         },
         Err(e) => eprintln!(
-            "Warning: cannot read database from {}: {}",
+            "[warning] Cannot read database from {}: {}",
             filename.display(),
             e
         ),
     }
-    eprintln!("Using empty database");
+    eprintln!(
+        "[database] File {} not present; using empty database",
+        filename.display()
+    );
     Database::new()
 }
 fn write_database_to_file(filename: &Path, database: &Database) {
-    match File::create(filename) {
-        Ok(file) => {
-            if let Err(e) = database.write_to(io::BufWriter::new(file)) {
-                eprintln!(
-                    "Warning: cannot write database to {}: {}",
-                    filename.display(),
-                    e
-                )
-            }
-        }
-        Err(e) => eprintln!(
-            "Warning: cannot write database to {}: {}",
-            filename.display(),
-            e
-        ),
-    }
+    File::create(filename)
+        .and_then(|f| database.write_to(io::BufWriter::new(f)))
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "[warning] Cannot write database to {}: {}",
+                filename.display(),
+                e
+            )
+        })
 }
 
 fn main() -> Result<(), String> {
@@ -78,6 +75,11 @@ fn main() -> Result<(), String> {
                         .default_value("0.0.0.0:8000"),
                 )
                 .arg(
+                    Arg::with_name("backup_file")
+                        .help("Path used for backup database file")
+                        .long("backup"),
+                )
+                .arg(
                     Arg::with_name("autosave")
                         .help("Interval (in minutes) between writing the database to disk")
                         .long("autosave")
@@ -93,25 +95,43 @@ fn main() -> Result<(), String> {
 
     match matches.subcommand() {
         ("wiki", Some(args)) => {
-            let addr = args.value_of("addr").unwrap();
-            let addr = match addr.parse() {
-                Ok(addr) => addr,
-                _ => return Err(format!("Unable to parse address: {}", addr)),
-            };
-
-            let autosave_duration = args.value_of("autosave").unwrap();
-            let minutes: u64 = match autosave_duration.parse() {
-                Ok(minutes) if minutes > 0 => minutes,
-                _ => {
-                    return Err(format!(
-                        "Unable to parse positive number for autosave interval: {}",
-                        autosave_duration
-                    ))
+            let addr = {
+                let addr = args.value_of("addr").unwrap();
+                match addr.parse() {
+                    Ok(addr) => addr,
+                    _ => return Err(format!("Unable to parse address: {}", addr)),
                 }
             };
-            let autosave_duration = Duration::from_secs(minutes * 60);
-
-            wiki::run(&addr, database_filepath, autosave_duration)
+            let backup_filepath = match matches.value_of_os("backup_file") {
+                Some(path) => Cow::Borrowed(Path::new(path)),
+                None => {
+                    let mut path = database_filepath.as_os_str().to_owned();
+                    path.push(".bak");
+                    Cow::Owned(PathBuf::from(path))
+                }
+            };
+            let autosave_duration = {
+                let minutes_text = args.value_of("autosave").unwrap();
+                let minutes: u64 = match minutes_text.parse() {
+                    Ok(minutes) if minutes > 0 => minutes,
+                    _ => {
+                        return Err(format!(
+                            "Unable to parse positive number for autosave interval: {}",
+                            minutes_text
+                        ))
+                    }
+                };
+                Duration::from_secs(minutes * 60)
+            };
+            eprintln!("[addr] {}", addr);
+            eprintln!("[database file] {}", database_filepath.display());
+            eprintln!("[backup file] {}", backup_filepath.display());
+            wiki::run(
+                &addr,
+                database_filepath,
+                &backup_filepath,
+                autosave_duration,
+            )
         }
         _ => Err("Missing subcommand".into()),
     }
