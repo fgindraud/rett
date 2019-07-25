@@ -22,6 +22,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Read the database from file.
+/// In case of failure returns an empty database (for bootstrap).
 fn read_database_from_file(filename: &Path) -> Database {
     match File::open(filename) {
         Ok(file) => match Database::read_from(io::BufReader::new(file)) {
@@ -44,12 +46,14 @@ fn read_database_from_file(filename: &Path) -> Database {
     );
     Database::new()
 }
-fn write_database_to_file(filename: &Path, database: &Database) {
+
+/// Write database to a file.
+fn write_database_to_file(filename: &Path, database: &Database) -> Result<(), String> {
     File::create(filename)
         .and_then(|f| database.write_to(io::BufWriter::new(f)))
-        .unwrap_or_else(|e| {
-            eprintln!(
-                "[warning] Cannot write database to {}: {}",
+        .map_err(|e| {
+            format!(
+                "Cannot write database to {}: {}",
                 filename.display(),
                 e
             )

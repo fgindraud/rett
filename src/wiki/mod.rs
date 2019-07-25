@@ -62,16 +62,20 @@ pub fn run(
         .map_err(|e| e.to_string());
 
     let database_autosave = timer::Interval::new_interval(autosave_interval)
+        .map_err(|e| e.to_string())
         .for_each({
             let state = state.clone();
-            move |_instant| Ok(state.write_to_file())
-        })
-        .map_err(|_| ());
+            move |_instant| state.write_to_file()
+        });
 
-    let mut runtime = current_thread::Runtime::new().map_err(|e| e.to_string())?;
-    runtime.spawn(database_autosave); // Background autosave
-    runtime.block_on(wiki)?; // Stop runtime when wiki terminates
-    state.write_to_file();
+    // Launch both autosave and wiki, stop whenever one terminates.
+    // select() return the other future, throw it away to let the runtime stop.
+    let which_terminates_first = Future::select(wiki, database_autosave).then(|f| match f {
+        Ok((v, _)) => Ok(v),
+        Err((e, _)) => Err(e),
+    });
+    current_thread::block_on_all(which_terminates_first)?;
+    state.write_to_file()?;
     Ok(())
 }
 
@@ -96,14 +100,15 @@ impl State {
             backup_file: backup_file.to_owned(),
         }
     }
-    fn write_to_file(&self) {
+    fn write_to_file(&self) -> Result<(), String> {
         let inner = &mut self.mutable.borrow_mut();
         if inner.modified_since_last_write {
             inner.modified_since_last_write = false;
             fs::rename(&self.database_file, &self.backup_file)
-                .unwrap_or_else(|e| eprintln!("[warning] Cannot move backup: {}", e));
-            super::write_database_to_file(&self.database_file, &inner.database);
+                .map_err(|e| format!("Cannot move backup: {}", e))?;
+            super::write_database_to_file(&self.database_file, &inner.database)?
         }
+        Ok(())
     }
     fn get(&self) -> cell::Ref<Database> {
         cell::Ref::map(self.mutable.borrow(), |s| &s.database)
