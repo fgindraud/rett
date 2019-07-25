@@ -199,6 +199,17 @@ fn display_element_page(element: Ref<Element>, edit_state: &EditState) -> String
         v
     };
     let descriptor_of = element.descriptor_of();
+    let relation_component_row = |r: Ref<Relation>| -> Markup {
+        html! {
+            tr {
+                td { a.relation href=(DisplayElement::url(r.index(), edit_state)) { "#" (r.index()) } }
+                td {
+                    (element_link(r.subject(), edit_state)) " " (element_link(r.descriptor(), edit_state))
+                    @if let Some(complement) = r.complement() { " " (element_link(complement, edit_state)) }
+                }
+            }
+        }
+    };
     let content = html! {
         h1 class=(css_class_name(element)) { (name) }
         p {
@@ -213,18 +224,14 @@ fn display_element_page(element: Ref<Element>, edit_state: &EditState) -> String
                 }
             }
             @if descriptions.len() > 0 {
-                ul {
-                    @for d in descriptions {
-                        li { (relation_link(d, edit_state)) }
-                    }
+                table {
+                    @for d in descriptions { (relation_component_row(d)) }
                 }
             }
             @if descriptor_of.len() > 0 {
                 p { (lang::DISPLAY_DESCRIBES) ":" }
-                ul {
-                    @for d in descriptor_of.iter() {
-                        li { (relation_link(d, edit_state)) }
-                    }
+                table {
+                    @for d in descriptor_of.iter() { (relation_component_row(d)) }
                 }
             }
         }
