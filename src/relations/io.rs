@@ -1,47 +1,31 @@
 use std::fmt;
-use std::io;
 use std::fs::File;
+use std::io;
 use std::path::Path;
 
 use super::{Atom, Database, Element, ElementData, Relation};
 use utils::SlotVec;
 
 /// Read the database from file.
-/// In case of failure returns an empty database (for bootstrap).
-pub fn read_database_from_file(filename: &Path) -> Database {
-    match File::open(filename) {
-        Ok(file) => match Database::read_from(io::BufReader::new(file)) {
-            Ok(database) => return database,
-            Err(e) => eprintln!(
-                "[warning] Invalid database format in file {}: {}",
-                filename.display(),
-                e
-            ),
-        },
-        Err(e) => eprintln!(
-            "[warning] Cannot read database from {}: {}",
-            filename.display(),
-            e
-        ),
-    }
-    eprintln!(
-        "[database] File {} not present; using empty database",
-        filename.display()
-    );
-    Database::new()
+pub fn read_database_from_file(filename: &Path) -> Result<Database, String> {
+    File::open(filename)
+        .map_err(|e| format!("Cannot read file {}: {}", filename.display(), e))
+        .and_then(|file| {
+            Database::read_from(io::BufReader::new(file)).map_err(|e| {
+                format!(
+                    "Invalid database format in file {}: {}",
+                    filename.display(),
+                    e
+                )
+            })
+        })
 }
 
 /// Write database to a file.
 pub fn write_database_to_file(filename: &Path, database: &Database) -> Result<(), String> {
     File::create(filename)
         .and_then(|f| database.write_to(io::BufWriter::new(f)))
-        .map_err(|e| {
-            format!(
-                "Cannot write database to {}: {}",
-                filename.display(),
-                e
-            )
-        })
+        .map_err(|e| format!("Cannot write database to {}: {}", filename.display(), e))
 }
 
 /******************************************************************************

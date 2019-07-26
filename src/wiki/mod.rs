@@ -33,7 +33,7 @@ pub fn run(
     backup_file: &Path,
     autosave_interval: Duration,
 ) -> Result<(), String> {
-    let state = Rc::new(State::from_file(database_file, backup_file));
+    let state = Rc::new(State::from_file(database_file, backup_file)?);
 
     let create_service = || {
         let state = state.clone();
@@ -93,15 +93,26 @@ struct InnerMutableState {
     modified_since_last_write: bool,
 }
 impl State {
-    fn from_file(database_file: &Path, backup_file: &Path) -> Self {
-        State {
+    fn from_file(database_file: &Path, backup_file: &Path) -> Result<Self, String> {
+        let init_database = match read_database_from_file(database_file) {
+            Ok(database) => database,
+            Err(e) => {
+                eprintln!("[warning] {}", e);
+                eprintln!("[database] Starting with empty database");
+                let db = Database::new();
+                // Write empty database so that autosave process does not fail
+                write_database_to_file(database_file, &db)?;
+                db
+            }
+        };
+        Ok(State {
             mutable: cell::RefCell::new(InnerMutableState {
-                database: read_database_from_file(database_file),
+                database: init_database,
                 modified_since_last_write: false,
             }),
             database_file: database_file.to_owned(),
             backup_file: backup_file.to_owned(),
-        }
+        })
     }
     fn write_to_file(&self) -> Result<(), String> {
         let inner = &mut self.mutable.borrow_mut();
