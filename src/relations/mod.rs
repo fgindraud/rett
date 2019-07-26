@@ -4,7 +4,7 @@ use std::fmt;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use utils::{Set, SlotVec};
+use utils::{FuzzySearcher, Set, SlotVec};
 
 /// Database write/read to files.
 mod io;
@@ -91,6 +91,7 @@ pub struct Database {
     elements: SlotVec<ElementData>,
     index_of_text_atoms: HashMap<String, AtomIndex>,
     index_of_relations: HashMap<Relation, RelationIndex>,
+    text_atom_fuzzy_searcher: FuzzySearcher<Index>,
 }
 
 impl Database {
@@ -99,6 +100,7 @@ impl Database {
             elements: SlotVec::new(),
             index_of_text_atoms: HashMap::new(),
             index_of_relations: HashMap::new(),
+            text_atom_fuzzy_searcher: FuzzySearcher::new(),
         }
     }
 
@@ -121,12 +123,15 @@ impl Database {
     }
     // Add a newly inserted Atom (at index) to tables. No-op on error.
     fn register_atom(&mut self, index: Index, atom: Atom) -> Result<(), Error> {
-        let insert = match atom {
-            Atom::Text(s) => self.index_of_text_atoms.insert(s, index),
-        };
-        match insert {
-            Some(_) => Err(Error::DuplicatedElement),
-            None => Ok(()),
+        match atom {
+            Atom::Text(s) => {
+                let insert = self.index_of_text_atoms.insert(s.clone(), index);
+                if insert.is_some() {
+                    return Err(Error::DuplicatedElement);
+                }
+                self.text_atom_fuzzy_searcher.insert(&s, index);
+                Ok(())
+            }
         }
     }
 
@@ -206,6 +211,14 @@ impl Database {
     pub fn iter<'a>(&'a self) -> ElementIterator<'a> {
         ElementIterator::new(self)
     }
+
+    /// Perform a fuzzy search for text atoms.
+    pub fn text_atom_fuzzy_matches<'a>(&'a self, pattern: &str) -> TextAtomFuzzyMatches<'a> {
+        TextAtomFuzzyMatches {
+            database: self,
+            decreasing_scores: self.text_atom_fuzzy_searcher.matches(pattern),
+        }
+    }
 }
 
 /// A Ref<'a, E> is a valid index into the database to an "element of type E".
@@ -216,19 +229,6 @@ pub struct Ref<'a, ElementType> {
     index: Index,
     marker: PhantomData<&'a ElementType>,
 }
-/// Wrap a Set<Index> so that it returns Ref<Relation> instead.
-#[derive(Clone, Copy)]
-pub struct RelationRefSet<'a> {
-    database: &'a Database,
-    set: &'a Set<Index>,
-}
-/// Enum of ref structs, to perform exploration.
-pub enum ElementRef<'a> {
-    Abstract(Ref<'a, Abstract>),
-    Atom(Ref<'a, Atom>),
-    Relation(Ref<'a, Relation>),
-}
-
 impl<'a, E> Ref<'a, E> {
     fn new(db: &'a Database, i: Index) -> Self {
         Self {
@@ -300,6 +300,13 @@ impl<'a> Ref<'a, Relation> {
         self.value().complement.map(|i| Ref::new(self.database, i))
     }
 }
+
+/// Wrap a Set<Index> so that it returns Ref<Relation> instead.
+#[derive(Clone, Copy)]
+pub struct RelationRefSet<'a> {
+    database: &'a Database,
+    set: &'a Set<Index>,
+}
 impl<'a> RelationRefSet<'a> {
     fn new(db: &'a Database, set: &'a Set<Index>) -> Self {
         Self {
@@ -320,6 +327,13 @@ impl<'a> RelationRefSet<'a> {
             .iter()
             .map(move |i| Ref::new(database, *i))
     }
+}
+
+/// Enum of ref structs, to perform exploration.
+pub enum ElementRef<'a> {
+    Abstract(Ref<'a, Abstract>),
+    Atom(Ref<'a, Atom>),
+    Relation(Ref<'a, Relation>),
 }
 
 /// Iterator on elements in the database, by increasing ids.
@@ -352,6 +366,21 @@ impl<'a> Iterator for ElementIterator<'a> {
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, Some(self.database.elements.capacity() - self.index))
+    }
+}
+
+/// Results of a fuzzy search as a "vec" of Ref<Atom> with decreasing match scores.
+pub struct TextAtomFuzzyMatches<'a> {
+    database: &'a Database,
+    decreasing_scores: Vec<(Index, usize)>,
+}
+impl<'a> TextAtomFuzzyMatches<'a> {
+    /// Iterator returning atoms with their matching score (in decreasing order).
+    pub fn iter<'s>(&'s self) -> impl Iterator<Item = (Ref<'a, Atom>, usize)> + 's {
+        let database = self.database; // Explicitely clone ref
+        self.decreasing_scores
+            .iter()
+            .map(move |p| (Ref::new(database, p.0), p.1))
     }
 }
 

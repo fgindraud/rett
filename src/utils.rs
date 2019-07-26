@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::iter::FromIterator;
 use std::ops;
 
@@ -214,13 +215,14 @@ impl<K: Ord, V> FromIterator<(K, V)> for Map<K, V> {
 /// Fuzzy search database for strings.
 /// Each string must be associated to a unique D value.
 /// This D value is returned in search results.
-/// The search is based on decomposing strings into [char;4] sequences,
+/// The search is based on decomposing strings into [char;3] sequences,
 /// and returning the D with the most associated sequences.
 /// Values are converted to lowercase to improve matching probability.
-pub struct FuzzySearcher<D: Ord + Clone> {
-    kmers: HashMap<[char; 4], Map<D, usize>>,
+#[derive(Debug)]
+pub struct FuzzySearcher<D: Ord + Clone + Hash> {
+    kmers: HashMap<[char; 3], Map<D, usize>>,
 }
-impl<D: Ord + Clone> FuzzySearcher<D> {
+impl<D: Ord + Clone + Hash> FuzzySearcher<D> {
     pub fn new() -> Self {
         FuzzySearcher {
             kmers: HashMap::new(),
@@ -229,28 +231,29 @@ impl<D: Ord + Clone> FuzzySearcher<D> {
     /// Associate D with the String.
     /// Only one association is allowed for each D.
     pub fn insert(&mut self, s: &str, d: D) {
-        let chars = Self::to_lowercase_char_vec(s);
-        Self::foreach_4_kmer(&chars, |kmer: &[char]| match self.kmers.get_mut(kmer) {
-            Some(map) => match map.get_mut(&d) {
-                Some(v) => *v += 1,
+        let chars = to_lowercase_char_vec(s);
+        for kmer in chars.windows(3) {
+            match self.kmers.get_mut(kmer) {
+                Some(map) => match map.get_mut(&d) {
+                    Some(v) => *v += 1,
+                    None => {
+                        map.insert(d.clone(), 1);
+                        ()
+                    }
+                },
                 None => {
-                    map.insert(d.clone(), 1);
+                    self.kmers
+                        .insert([kmer[0], kmer[1], kmer[2]], Map::from(vec![(d.clone(), 1)]));
                     ()
                 }
-            },
-            None => {
-                let mut buf: [char; 4] = Default::default();
-                buf.copy_from_slice(kmer);
-                self.kmers.insert(buf, Map::from(vec![(d.clone(), 1)]));
-                ()
             }
-        })
+        }
     }
     /// Remove association between D and the String.
     /// The arguments must be the same as used for add(s, d).
     pub fn remove(&mut self, s: &str, d: &D) {
-        let chars = Self::to_lowercase_char_vec(s);
-        Self::foreach_4_kmer(&chars, |kmer: &[char]| {
+        let chars = to_lowercase_char_vec(s);
+        for kmer in chars.windows(3) {
             let rm_entry = match self.kmers.get_mut(kmer) {
                 Some(map) => {
                     // Remove all references to D at once, optimization.
@@ -262,37 +265,34 @@ impl<D: Ord + Clone> FuzzySearcher<D> {
             if rm_entry {
                 self.kmers.remove(kmer);
             }
-        })
-    }
-    pub fn matching_scores(&self, s: &str) -> Vec<(D, usize)> {
-        //let mut score_table = Map::new();
-        unimplemented!()
+        }
     }
 
-    /// Call f on each found kmer of size 4.
-    fn foreach_4_kmer<F: FnMut(&[char])>(chars: &[char], mut f: F) {
-        // Complete windows
-        for win in chars.windows(4) {
-            f(win)
+    pub fn matches(&self, s: &str) -> Vec<(D, usize)> {
+        let chars = to_lowercase_char_vec(s);
+        // Accumulate number of matching kmer to each defined D.
+        let mut score_table = HashMap::new();
+        for kmer in chars.windows(3) {
+            if let Some(map) = self.kmers.get(kmer) {
+                for (d, count) in map.as_ref().iter() {
+                    match score_table.get_mut(d) {
+                        Some(score) => *score += count,
+                        None => {
+                            score_table.insert(d.clone(), *count);
+                            ()
+                        }
+                    }
+                }
+            }
         }
-        // Borders, fill empty parts with '\0's
-        let c0 = char::default();
-        if chars.len() >= 1 {
-            f(&[c0, c0, c0, chars[0]]);
-            f(&[chars[0], c0, c0, c0]);
-        }
-        if chars.len() >= 2 {
-            f(&[c0, c0, chars[0], chars[1]]);
-            f(&[chars[0], chars[1], c0, c0]);
-        }
-        if chars.len() >= 3 {
-            f(&[c0, chars[0], chars[1], chars[2]]);
-            f(&[chars[0], chars[1], chars[2], c0]);
-        }
+        // Sort by decreasing match count
+        let mut scores: Vec<_> = score_table.into_iter().collect();
+        scores.sort_unstable_by(|lhs, rhs| rhs.1.cmp(&lhs.1));
+        scores
     }
-    fn to_lowercase_char_vec(s: &str) -> Vec<char> {
-        s.chars().flat_map(|c| c.to_lowercase()).collect()
-    }
+}
+fn to_lowercase_char_vec(s: &str) -> Vec<char> {
+    s.chars().flat_map(|c| c.to_lowercase()).collect()
 }
 
 #[cfg(test)]
@@ -303,6 +303,9 @@ mod tests {
     fn fuzzy_search() {
         let mut searcher = FuzzySearcher::new();
         searcher.insert("Hello world !", 0);
-        searcher.insert("Marsupilami", 1);
+        searcher.insert("This is a beautiful world", 1);
+        searcher.insert("War of Worlds...", 2);
+        eprintln!("{:?}", searcher.matches("world"));
+        eprintln!("{:?}", searcher.matches("This is war !"));
     }
 }
