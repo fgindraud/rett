@@ -44,6 +44,7 @@ pub fn run(
                 web::end_point_handler::<CreateAtom>,
                 web::end_point_handler::<CreateAbstract>,
                 web::end_point_handler::<CreateRelation>,
+                web::end_point_handler::<RemoveElement>,
                 web::end_point_handler::<StaticAsset>,
             ];
             web::handle_request(request, state.clone(), handlers.iter())
@@ -551,6 +552,35 @@ impl EndPoint for CreateRelation {
     }
 }
 
+// Modes {
+// - one element (must be orphaned), page is preview, default
+// - recursive (no requirements): preview with list, revert if list changed
+// - recursive + orphans ?
+struct RemoveElement {
+    index: Index,
+    edit_state: EditState,
+}
+impl RemoveElement {
+    fn url(index: Index, edit_state: &EditState) -> String {
+        web::to_path_and_query(format!("/remove/{}", index), edit_state)
+    }
+}
+impl EndPoint for RemoveElement {
+    type State = State;
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
+        match (r.method(), remove_prefix(r.uri().path(), "/remove/")) {
+            (&Method::GET, Some(index)) => Ok(FromRequestOk::Value(RemoveElement {
+                index: parse_index(index)?,
+                edit_state: web::from_query(r.uri().query())?,
+            })),
+            _ => Err(FromRequestError::NoMatch(r)),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        web::response_empty_404() //TODO
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 /// Language specific configuration.
 /// Contains text constants.
@@ -590,6 +620,8 @@ mod lang {
     pub const CREATE_RELATION_NAV: ConstStr = PreEscaped("Relation...");
     pub const CREATE_RELATION_TITLE: ConstStr = PreEscaped("Ajouter une relation...");
     pub const CREATE_RELATION_MISSING: ConstStr = PreEscaped("Champ manquant !");
+
+    pub const REMOVE_ELEMENT_NAV: ConstStr = PreEscaped("Supprimer");
 }
 
 fn css_class_name(element: Ref<Element>) -> &'static str {
@@ -698,6 +730,9 @@ fn navigation_links(edit_state: &EditState, displayed: Option<Ref<Element>>) -> 
         (selection_nav_link(lang::RELATION_DESCRIPTOR, displayed, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e }))
         (selection_nav_link(lang::RELATION_COMPLEMENT, displayed, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e }))
         a.relation href=(CreateRelation::url(edit_state)) { (lang::CREATE_RELATION_NAV) }
+        @if let Some(index) = displayed {
+            a href=(RemoveElement::url(index, edit_state)) { (lang::REMOVE_ELEMENT_NAV) }
+        }
     }
 }
 fn selection_nav_link<IFV, WFV>(
