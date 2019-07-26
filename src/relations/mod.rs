@@ -308,14 +308,17 @@ impl<'a> RelationRefSet<'a> {
         }
     }
     pub fn len(&self) -> usize {
-        self.set.len()
+        self.set.as_ref().len()
     }
     pub fn get(&self, i: usize) -> Ref<'a, Relation> {
-        Ref::new(self.database, self.set[i])
+        Ref::new(self.database, self.set.as_ref()[i])
     }
     pub fn iter(&self) -> impl Iterator<Item = Ref<'a, Relation>> {
         let database = self.database; // Explicitely clone ref
-        self.set.into_iter().map(move |i| Ref::new(database, *i))
+        self.set
+            .as_ref()
+            .iter()
+            .map(move |i| Ref::new(database, *i))
     }
 }
 

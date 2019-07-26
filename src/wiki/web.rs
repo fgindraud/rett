@@ -4,10 +4,11 @@ use hyper::{Body, Request, Response, StatusCode};
 use percent_encoding::{percent_decode, utf8_percent_encode, QUERY_ENCODE_SET};
 use std::borrow::{Borrow, Cow};
 use std::fmt::{self, Write};
-use std::iter::FromIterator;
 use std::rc::Rc;
 use std::str;
 use tokio::prelude::future;
+
+use utils::Map;
 
 #[derive(Debug)]
 pub enum Error {
@@ -252,16 +253,16 @@ impl PathQueryBuilder {
 /// Associative map based on a sorted vector.
 #[derive(Debug, PartialEq, Eq)]
 pub struct UrlDecodedEntries<'r> {
-    inner: Vec<(Cow<'r, str>, Cow<'r, str>)>,
+    inner: Map<Cow<'r, str>, Cow<'r, str>>,
 }
 impl<'r> UrlDecodedEntries<'r> {
     /// With no entries
     pub fn new() -> Self {
-        UrlDecodedEntries { inner: Vec::new() }
+        UrlDecodedEntries { inner: Map::new() }
     }
     /// Decode entries from raw input.
     pub fn decode(input: &'r [u8]) -> Result<Self, Error> {
-        input
+        let entries: Result<Map<_, _>, Error> = input
             .split(|b| *b == b'&')
             .map(|entry| {
                 let mut it = entry.split(|b| *b == b'=');
@@ -274,7 +275,8 @@ impl<'r> UrlDecodedEntries<'r> {
                     _ => Err(Error::BadRequest),
                 }
             })
-            .collect()
+            .collect();
+        entries.map(|inner| UrlDecodedEntries { inner })
     }
     /// Access entries by name.
     pub fn get<Q>(&self, k: &Q) -> Option<&str>
@@ -282,20 +284,7 @@ impl<'r> UrlDecodedEntries<'r> {
         Cow<'r, str>: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        self.inner
-            .binary_search_by_key(&k, |p| p.0.borrow())
-            .map(|index| self.inner[index].1.as_ref())
-            .ok()
-    }
-}
-impl<'r> FromIterator<(Cow<'r, str>, Cow<'r, str>)> for UrlDecodedEntries<'r> {
-    fn from_iter<T>(iter: T) -> Self
-    where
-        T: IntoIterator<Item = (Cow<'r, str>, Cow<'r, str>)>,
-    {
-        let mut v = Vec::from_iter(iter);
-        v.sort_unstable_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
-        UrlDecodedEntries { inner: v }
+        self.inner.get(k).map(AsRef::as_ref)
     }
 }
 
