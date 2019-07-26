@@ -10,55 +10,17 @@ extern crate tokio;
 #[macro_use]
 extern crate clap; // Command line parser
 
+/// Datastructures and utility functions.
+mod utils;
+
 /// Knowledge database as a set of sentences.
 mod relations;
-use relations::Database;
 
 /// Wiki interface
 mod wiki;
 use std::borrow::Cow;
-use std::fs::File;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-
-/// Read the database from file.
-/// In case of failure returns an empty database (for bootstrap).
-fn read_database_from_file(filename: &Path) -> Database {
-    match File::open(filename) {
-        Ok(file) => match Database::read_from(io::BufReader::new(file)) {
-            Ok(database) => return database,
-            Err(e) => eprintln!(
-                "[warning] Invalid database format in file {}: {}",
-                filename.display(),
-                e
-            ),
-        },
-        Err(e) => eprintln!(
-            "[warning] Cannot read database from {}: {}",
-            filename.display(),
-            e
-        ),
-    }
-    eprintln!(
-        "[database] File {} not present; using empty database",
-        filename.display()
-    );
-    Database::new()
-}
-
-/// Write database to a file.
-fn write_database_to_file(filename: &Path, database: &Database) -> Result<(), String> {
-    File::create(filename)
-        .and_then(|f| database.write_to(io::BufWriter::new(f)))
-        .map_err(|e| {
-            format!(
-                "Cannot write database to {}: {}",
-                filename.display(),
-                e
-            )
-        })
-}
 
 fn main() -> Result<(), String> {
     use clap::{AppSettings, Arg, SubCommand};

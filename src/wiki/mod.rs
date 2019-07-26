@@ -13,11 +13,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
+use relations::{read_database_from_file, write_database_to_file};
 use relations::{Abstract, Atom, Database, Element, ElementRef, Index, Ref, Relation};
+use utils::remove_prefix;
 
 /// Mini web framework.
 mod web;
-use self::web::{remove_prefix, EndPoint, FromRequestError, FromRequestOk};
+use self::web::{EndPoint, FromRequestError, FromRequestOk};
 
 /******************************************************************************
  * Wiki runtime system.
@@ -94,7 +96,7 @@ impl State {
     fn from_file(database_file: &Path, backup_file: &Path) -> Self {
         State {
             mutable: cell::RefCell::new(InnerMutableState {
-                database: super::read_database_from_file(database_file),
+                database: read_database_from_file(database_file),
                 modified_since_last_write: false,
             }),
             database_file: database_file.to_owned(),
@@ -107,7 +109,7 @@ impl State {
             inner.modified_since_last_write = false;
             fs::rename(&self.database_file, &self.backup_file)
                 .map_err(|e| format!("Cannot move backup: {}", e))?;
-            super::write_database_to_file(&self.database_file, &inner.database)?
+            write_database_to_file(&self.database_file, &inner.database)?
         }
         Ok(())
     }

@@ -187,14 +187,6 @@ where
     }
 }
 
-/// Remove prefix and return tail of string if successful
-pub fn remove_prefix<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-    match s.get(..prefix.len()) {
-        Some(p) if p == prefix => Some(&s[prefix.len()..]),
-        _ => None,
-    }
-}
-
 /******************************************************************************
  * Query writing tools.
  */
