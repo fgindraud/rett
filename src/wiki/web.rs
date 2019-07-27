@@ -130,6 +130,13 @@ pub fn response_html<B: Into<Body>>(body: B) -> Response<Body> {
         .unwrap()
 }
 /// Create an empty 404 response.
+pub fn response_empty_400() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::BAD_REQUEST)
+        .body(Body::empty())
+        .unwrap()
+}
+/// Create an empty 404 response.
 pub fn response_empty_404() -> Response<Body> {
     Response::builder()
         .status(StatusCode::NOT_FOUND)

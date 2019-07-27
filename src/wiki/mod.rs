@@ -426,15 +426,15 @@ impl EndPoint for CreateAtom {
         match self {
             CreateAtom::Get { edit_state } => {
                 let content = html! {
-                    h1.atom { (lang::CREATE_ATOM_TITLE) }
-                    form.vbox method="post" action=(CreateAtom::url(&edit_state)) {
-                        input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
-                        div.hbox {
-//                            button formmethod="get" { (lang::PREVIEW_BUTTON) }
-                            button { (lang::COMMIT_BUTTON) }
-                        }
-                    }
-                };
+                                    h1.atom { (lang::CREATE_ATOM_TITLE) }
+                                    form.vbox method="post" action=(CreateAtom::url(&edit_state)) {
+                                        input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
+                                        div.hbox {
+                //                            button formmethod="get" { (lang::PREVIEW_BUTTON) }
+                                            button { (lang::COMMIT_BUTTON) }
+                                        }
+                                    }
+                                };
                 let nav = navigation_links(&edit_state, None);
                 let page = compose_wiki_page(lang::CREATE_ATOM_TITLE, content, nav);
                 web::response_html(page)
@@ -487,15 +487,15 @@ impl EndPoint for CreateAbstract {
         match self {
             CreateAbstract::Get { edit_state } => {
                 let content = html! {
-                    h1.abstract { (lang::CREATE_ABSTRACT_TITLE) }
-                    form.vbox method="post" action=(CreateAbstract::url(&edit_state)) {
-                        input type="text" name="name" placeholder=(lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
-                        div.hbox {
-//                            button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
-                            button { (lang::COMMIT_BUTTON) }
-                        }
-                    }
-                };
+                                    h1.abstract { (lang::CREATE_ABSTRACT_TITLE) }
+                                    form.vbox method="post" action=(CreateAbstract::url(&edit_state)) {
+                                        input type="text" name="name" placeholder=(lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
+                                        div.hbox {
+                //                            button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
+                                            button { (lang::COMMIT_BUTTON) }
+                                        }
+                                    }
+                                };
                 let nav = navigation_links(&edit_state, None);
                 let page = compose_wiki_page(lang::CREATE_ABSTRACT_TITLE, content, nav);
                 web::response_html(page)
@@ -506,11 +506,13 @@ impl EndPoint for CreateAbstract {
                 if let Some(name) = name {
                     let name_element = database.insert_atom(Atom::from(name));
                     let is_named_atom = database.insert_atom(Atom::from(lang::NAMED_ATOM));
-                    let _naming_relation = database.insert_relation(Relation {
-                        subject: index,
-                        descriptor: is_named_atom,
-                        complement: Some(name_element),
-                    });
+                    let _naming_relation = database
+                        .insert_relation(Relation {
+                            subject: index,
+                            descriptor: is_named_atom,
+                            complement: Some(name_element),
+                        })
+                        .expect("Data race on database");
                 }
                 web::response_redirection(&DisplayElement::url(index, &edit_state))
             }
@@ -634,6 +636,11 @@ impl EndPoint for CreateRelation {
 struct RemoveElement {
     index: Index,
     edit_state: EditState,
+    step: RemoveElementStep,
+}
+enum RemoveElementStep {
+    Confirmation,
+    Removal,
 }
 impl RemoveElement {
     fn url(index: Index, edit_state: &EditState) -> String {
@@ -644,15 +651,51 @@ impl EndPoint for RemoveElement {
     type State = State;
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/remove/")) {
-            (&Method::GET, Some(index)) => Ok(FromRequestOk::Value(RemoveElement {
-                index: parse_index(index)?,
-                edit_state: web::from_query(r.uri().query())?,
-            })),
+            (&Method::GET, Some(index)) | (&Method::POST, Some(index)) => {
+                Ok(FromRequestOk::Value(RemoveElement {
+                    index: parse_index(index)?,
+                    edit_state: web::from_query(r.uri().query())?,
+                    step: match r.method() {
+                        &Method::GET => RemoveElementStep::Confirmation,
+                        &Method::POST => RemoveElementStep::Removal,
+                        _ => unreachable!(),
+                    },
+                }))
+            }
             _ => Err(FromRequestError::NoMatch(r)),
         }
     }
     fn generate_response(self, state: &State) -> Response<Body> {
-        web::response_empty_404() //TODO
+        match self.step {
+            RemoveElementStep::Confirmation => {
+                let database = state.get();
+                let element = match database.element(self.index) {
+                    Ok(element) => element,
+                    Err(_) => return web::response_empty_400(),
+                };
+                let content = html! {
+                    h1 class=(css_class_name(element)) { (lang::REMOVE_ELEMENT_TITLE) }
+                    p { (lang::REMOVE_ELEMENT_TITLE) ": " (element_link(element, &self.edit_state)) }
+                    @if element.is_referenced() {
+                        p.error { (lang::REMOVE_ELEMENT_REFERENCED_MESSAGE) }
+                        ul {
+                            @for e in element
+                                .subject_of().iter()
+                                .chain(element.descriptor_of().iter())
+                                .chain(element.complement_of().iter())
+                            { li { (relation_link(e, &self.edit_state)) } }
+                        }
+                    }
+                    form.hbox method="post" action=(RemoveElement::url(self.index, &self.edit_state)) {
+                        button disabled?[element.is_referenced()] { (lang::COMMIT_BUTTON) }
+                    }
+                };
+                let nav = navigation_links(&self.edit_state, Some(element));
+                let page = compose_wiki_page(lang::REMOVE_ELEMENT_TITLE, content, nav);
+                web::response_html(page)
+            }
+            RemoveElementStep::Removal => unimplemented!(),
+        }
     }
 }
 
@@ -700,6 +743,8 @@ mod lang {
     pub const CREATE_RELATION_MISSING: ConstStr = PreEscaped("Champ manquant !");
 
     pub const REMOVE_ELEMENT_NAV: ConstStr = PreEscaped("Supprimer");
+    pub const REMOVE_ELEMENT_TITLE: ConstStr = PreEscaped("Supprimer un élément");
+    pub const REMOVE_ELEMENT_REFERENCED_MESSAGE: ConstStr = PreEscaped("Élément référencé par :");
 }
 
 fn css_class_name(element: Ref<Element>) -> &'static str {

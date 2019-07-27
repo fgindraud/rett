@@ -252,6 +252,12 @@ impl<'a, E> Ref<'a, E> {
     pub fn complement_of(&self) -> RelationRefSet<'a> {
         RelationRefSet::new(self.database, &self.data().complement_of)
     }
+    pub fn is_referenced(&self) -> bool {
+        let data = self.data();
+        data.subject_of.as_ref().len() > 0
+            || data.descriptor_of.as_ref().len() > 0
+            || data.complement_of.as_ref().len() > 0
+    }
     fn data(&self) -> &'a ElementData {
         &self.database.elements[self.index]
     }
