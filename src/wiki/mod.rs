@@ -48,6 +48,7 @@ pub fn run(
                 web::end_point_handler::<CreateAbstract>,
                 web::end_point_handler::<CreateRelation>,
                 web::end_point_handler::<RemoveElement>,
+                web::end_point_handler::<ChangeAtomValue>,
                 web::end_point_handler::<StaticAsset>,
             ];
             web::handle_request(request, state.clone(), handlers.iter())
@@ -680,7 +681,7 @@ impl EndPoint for RemoveElement {
                 let database = state.get();
                 let element = match database.element(self.index) {
                     Ok(element) => element,
-                    Err(_) => return web::response_empty_400(),
+                    Err(_) => return web::response_empty_404(),
                 };
                 let content = html! {
                     h1 class=(css_class_name(element)) { (lang::REMOVE_ELEMENT_TITLE) }
@@ -699,7 +700,7 @@ impl EndPoint for RemoveElement {
                         button disabled?[element.is_referenced()] { (lang::COMMIT_BUTTON) }
                     }
                 };
-                let nav = navigation_links(&self.edit_state, Some(element));
+                let nav = navigation_links(&self.edit_state, None);
                 let page = compose_wiki_page(lang::REMOVE_ELEMENT_TITLE, content, nav);
                 web::response_html(page)
             }
@@ -723,6 +724,84 @@ impl EndPoint for RemoveElement {
                 let page = compose_wiki_page(lang::REMOVE_ELEMENT_REMOVED, content, nav);
                 web::response_html(page)
             }
+        }
+    }
+}
+
+/// Replace an atom with another while preserving relations.
+enum ChangeAtomValue {
+    Get {
+        index: Index,
+        edit_state: EditState,
+    },
+    Post {
+        text: String,
+        index: Index,
+        edit_state: EditState,
+    },
+}
+impl ChangeAtomValue {
+    fn url(index: Index, edit_state: &EditState) -> String {
+        web::to_path_and_query(format!("/change/atom/{}", index), edit_state)
+    }
+}
+impl EndPoint for ChangeAtomValue {
+    type State = State;
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
+        match (r.method(), remove_prefix(r.uri().path(), "/change/atom/")) {
+            (&Method::GET, Some(index)) => Ok(FromRequestOk::Value(ChangeAtomValue::Get {
+                index: parse_index(index)?,
+                edit_state: web::from_query(r.uri().query())?,
+            })),
+            (&Method::POST, Some(index)) => {
+                let index = parse_index(index)?;
+                let edit_state = web::from_query(r.uri().query())?;
+                web::with_post_entries(r, move |entries| {
+                    let text = entries.get("text").ok_or(web::Error::BadRequest)?;
+                    let text = text.to_string();
+                    Ok(ChangeAtomValue::Post {
+                        text,
+                        index,
+                        edit_state,
+                    })
+                })
+            }
+            _ => Err(FromRequestError::NoMatch(r)),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        match self {
+            ChangeAtomValue::Get { index, edit_state } => {
+                let database = state.get();
+                let element = match database.element(index) {
+                    Ok(element) => element,
+                    Err(_) => return web::response_empty_404(),
+                };
+                let content = html! {
+                    h1.atom { (lang::CHANGE_ATOM_VALUE_TITLE) }
+                    p {
+                        (lang::CHANGE_ATOM_VALUE_CURRENT) " " (element_link(element, &edit_state))
+                    }
+                    form.vbox method="post" action=(ChangeAtomValue::url(index, &edit_state)) {
+                        input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
+                        div.hbox {
+                            // button formmethod="get" { (lang::PREVIEW_BUTTON) }
+                            button { (lang::COMMIT_BUTTON) }
+                        }
+                    }
+                };
+                let nav = navigation_links(&edit_state, None);
+                let page = compose_wiki_page(lang::CHANGE_ATOM_VALUE_TITLE, content, nav);
+                web::response_html(page)
+            }
+            ChangeAtomValue::Post {
+                text,
+                index,
+                edit_state,
+            } => match state.get_mut().replace_atom_value(index, Atom::from(text)) {
+                Ok(()) => web::response_redirection(&DisplayElement::url(index, &edit_state)),
+                Err(_) => web::response_empty_400(), //TODO give better information
+            },
         }
     }
 }
@@ -774,6 +853,10 @@ mod lang {
     pub const REMOVE_ELEMENT_TITLE: ConstStr = PreEscaped("Supprimer un élément");
     pub const REMOVE_ELEMENT_REFERENCED_MESSAGE: ConstStr = PreEscaped("Élément référencé par :");
     pub const REMOVE_ELEMENT_REMOVED: ConstStr = PreEscaped("Élément supprimé");
+
+    pub const CHANGE_ATOM_VALUE_NAV: ConstStr = PreEscaped("Changer");
+    pub const CHANGE_ATOM_VALUE_TITLE: ConstStr = PreEscaped("Changer atome...");
+    pub const CHANGE_ATOM_VALUE_CURRENT: ConstStr = PreEscaped("Valeur actuelle :");
 }
 
 fn css_class_name(element: Ref<Element>) -> &'static str {
@@ -872,19 +955,25 @@ fn element_link(r: Ref<Element>, edit_state: &EditState) -> Markup {
 
 /// Generates sequence of navigation links depending on state.
 fn navigation_links(edit_state: &EditState, displayed: Option<Ref<Element>>) -> Markup {
-    let displayed = displayed.map(|r| r.index());
+    let displayed_i = displayed.map(|e| e.index());
     html! {
         a href=(Homepage::url(edit_state)) { (lang::HOMEPAGE) }
         a href=(ListAllElements::url(edit_state)) { (lang::ALL_ELEMENTS_NAV) }
         a.atom href=(SearchAtom::url(edit_state)) { (lang::SEARCH_ATOM_NAV) }
         a.atom href=(CreateAtom::url(edit_state)) { (lang::CREATE_ATOM_NAV) }
         a.abstract href=(CreateAbstract::url(edit_state)) { (lang::CREATE_ABSTRACT_NAV) }
-        (selection_nav_link(lang::RELATION_SUBJECT, displayed, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e }))
-        (selection_nav_link(lang::RELATION_DESCRIPTOR, displayed, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e }))
-        (selection_nav_link(lang::RELATION_COMPLEMENT, displayed, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e }))
+        (selection_nav_link(lang::RELATION_SUBJECT, displayed_i, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e }))
+        (selection_nav_link(lang::RELATION_DESCRIPTOR, displayed_i, edit_state, |e| e.descriptor, |e,descriptor| EditState{ descriptor, ..*e }))
+        (selection_nav_link(lang::RELATION_COMPLEMENT, displayed_i, edit_state, |e| e.complement, |e,complement| EditState{ complement, ..*e }))
         a.relation href=(CreateRelation::url(edit_state)) { (lang::CREATE_RELATION_NAV) }
-        @if let Some(index) = displayed {
-            a href=(RemoveElement::url(index, edit_state)) { (lang::REMOVE_ELEMENT_NAV) }
+        @if let Some(displayed) = displayed {
+            a href=(RemoveElement::url(displayed.index(), edit_state)) { (lang::REMOVE_ELEMENT_NAV) }
+            @match displayed.value() {
+                Element::Atom(_) => {
+                    a.atom href=(ChangeAtomValue::url(displayed.index(), edit_state)) { (lang::CHANGE_ATOM_VALUE_NAV) }
+                },
+                _ => {},
+            }
         }
     }
 }

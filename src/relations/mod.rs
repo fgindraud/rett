@@ -13,9 +13,10 @@ pub use self::io::{read_database_from_file, write_database_to_file};
 /// Error type for graph operations
 #[derive(Debug, Eq, PartialEq)]
 pub enum Error {
-    InvalidIndex,
-    DuplicatedElement,
-    RemoveReferenced,
+    InvalidIndex,      // Index does not exists or element
+    DuplicatedElement, // Trying to insert an already existing element
+    RemoveReferenced,  // Trying to remove a referenced element
+    WouldMerge,        // An operation would force an merge of elements
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -23,6 +24,7 @@ impl fmt::Display for Error {
             Error::InvalidIndex => "invalid index".fmt(f),
             Error::DuplicatedElement => "duplicated element".fmt(f),
             Error::RemoveReferenced => "trying to remove referenced element".fmt(f),
+            Error::WouldMerge => "elements would be merged with this operation".fmt(f),
         }
     }
 }
@@ -260,6 +262,27 @@ impl Database {
             Element::Relation(r) => self.unregister_relation(index, r),
         }
         Ok(element_data.value)
+    }
+
+    /// Replace the value of an existing atom with another.
+    /// All relations are preserved.
+    /// The new value must not exist in the database already.
+    pub fn replace_atom_value(&mut self, index: Index, new_atom: Atom) -> Result<(), Error> {
+        if self.index_of_atom(&new_atom).is_some() {
+            return Err(Error::WouldMerge);
+        }
+        let old_atom = match &mut self
+            .elements
+            .get_mut(index)
+            .ok_or(Error::InvalidIndex)?
+            .value
+        {
+            Element::Atom(ref mut a) => std::mem::replace(a, new_atom.clone()),
+            _ => return Err(Error::InvalidIndex),
+        };
+        self.unregister_atom(index, &old_atom);
+        self.register_atom(index, new_atom).unwrap();
+        Ok(())
     }
 }
 
