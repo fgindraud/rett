@@ -219,6 +219,10 @@ impl Database {
             decreasing_scores: self.text_atom_fuzzy_searcher.matches(pattern),
         }
     }
+
+    pub fn remove_element(&mut self, index: Index) -> Result<Element, Error> {
+        unimplemented!()
+    }
 }
 
 /// A Ref<'a, E> is a valid index into the database to an "element of type E".

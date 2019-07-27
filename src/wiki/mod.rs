@@ -146,6 +146,16 @@ struct EditState {
     descriptor: Option<Index>,
     complement: Option<Index>,
 }
+impl EditState {
+    fn remove_references_to(&self, index: Index) -> EditState {
+        let filtered = |opt: &Option<Index>| opt.filter(|i| i != &index);
+        EditState {
+            subject: filtered(&self.subject),
+            descriptor: filtered(&self.descriptor),
+            complement: filtered(&self.complement),
+        }
+    }
+}
 impl web::QueryFormat for EditState {
     fn to_query(&self, builder: &mut web::PathQueryBuilder) {
         builder.optional_entry("subject", self.subject);
@@ -694,7 +704,26 @@ impl EndPoint for RemoveElement {
                 let page = compose_wiki_page(lang::REMOVE_ELEMENT_TITLE, content, nav);
                 web::response_html(page)
             }
-            RemoveElementStep::Removal => unimplemented!(),
+            RemoveElementStep::Removal => {
+                let removed_element = match state.get_mut().remove_element(self.index) {
+                    Ok(e) => e,
+                    Err(_) => return web::response_empty_400(),
+                };
+                let content = html! {
+                    h1 { (lang::REMOVE_ELEMENT_REMOVED) }
+                    p {
+                        (lang::REMOVE_ELEMENT_REMOVED) ": "
+                        @match removed_element {
+                            Element::Abstract => (lang::ABSTRACT),
+                            Element::Atom(_) => (lang::ATOM),
+                            Element::Relation(_) => (lang::RELATION),
+                        } "#" (self.index)
+                    }
+                };
+                let nav = navigation_links(&self.edit_state.remove_references_to(self.index), None);
+                let page = compose_wiki_page(lang::REMOVE_ELEMENT_REMOVED, content, nav);
+                web::response_html(page)
+            }
         }
     }
 }
@@ -745,6 +774,7 @@ mod lang {
     pub const REMOVE_ELEMENT_NAV: ConstStr = PreEscaped("Supprimer");
     pub const REMOVE_ELEMENT_TITLE: ConstStr = PreEscaped("Supprimer un élément");
     pub const REMOVE_ELEMENT_REFERENCED_MESSAGE: ConstStr = PreEscaped("Élément référencé par :");
+    pub const REMOVE_ELEMENT_REMOVED: ConstStr = PreEscaped("Élément supprimé");
 }
 
 fn css_class_name(element: Ref<Element>) -> &'static str {
