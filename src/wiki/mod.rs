@@ -430,7 +430,7 @@ impl EndPoint for CreateAtom {
                     form.vbox method="post" action=(CreateAtom::url(&edit_state)) {
                         input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
                         div.hbox {
-                            button formmethod="get" { (lang::PREVIEW_BUTTON) }
+//                            button formmethod="get" { (lang::PREVIEW_BUTTON) }
                             button { (lang::COMMIT_BUTTON) }
                         }
                     }
@@ -491,7 +491,7 @@ impl EndPoint for CreateAbstract {
                     form.vbox method="post" action=(CreateAbstract::url(&edit_state)) {
                         input type="text" name="name" placeholder=(lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
                         div.hbox {
-                            button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
+//                            button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
                             button { (lang::COMMIT_BUTTON) }
                         }
                     }
