@@ -49,6 +49,7 @@ pub fn run(
                 web::end_point_handler::<CreateRelation>,
                 web::end_point_handler::<RemoveElement>,
                 web::end_point_handler::<ChangeAtomValue>,
+                web::end_point_handler::<AtomToNamedAbstract>,
                 web::end_point_handler::<StaticAsset>,
             ];
             web::handle_request(request, state.clone(), handlers.iter())
@@ -415,7 +416,6 @@ impl CreateAtom {
     }
 }
 impl EndPoint for CreateAtom {
-    //TODO implement preview button: fuzzy search current text content and propose similar atoms
     type State = State;
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), r.uri().path()) {
@@ -441,7 +441,7 @@ impl EndPoint for CreateAtom {
                     form.vbox method="post" action=(CreateAtom::url(&edit_state)) {
                         input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
                         div.hbox {
-                            // button formmethod="get" { (lang::PREVIEW_BUTTON) }
+                            //TODO button formmethod="get" { (lang::PREVIEW_BUTTON) }
                             button { (lang::COMMIT_BUTTON) }
                         }
                     }
@@ -502,7 +502,7 @@ impl EndPoint for CreateAbstract {
                     form.vbox method="post" action=(CreateAbstract::url(&edit_state)) {
                         input type="text" name="name" placeholder=(lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
                         div.hbox {
-                            // button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
+                            //TODO button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
                             button { (lang::COMMIT_BUTTON) }
                         }
                     }
@@ -773,19 +773,22 @@ impl EndPoint for ChangeAtomValue {
         match self {
             ChangeAtomValue::Get { index, edit_state } => {
                 let database = state.get();
-                let element = match database.element(index) {
-                    Ok(element) => element,
+                let atom = match database.element(index) {
+                    Ok(element) => match element.cases() {
+                        ElementRef::Atom(a) => a,
+                        _ => return web::response_empty_400(),
+                    },
                     Err(_) => return web::response_empty_404(),
                 };
                 let content = html! {
                     h1.atom { (lang::CHANGE_ATOM_VALUE_TITLE) }
                     p {
-                        (lang::CHANGE_ATOM_VALUE_CURRENT) " " (element_link(element, &edit_state))
+                        (lang::CURRENT_VALUE) " " (atom_link(atom, &edit_state))
                     }
                     form.vbox method="post" action=(ChangeAtomValue::url(index, &edit_state)) {
                         input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
                         div.hbox {
-                            // button formmethod="get" { (lang::PREVIEW_BUTTON) }
+                            //TODO button formmethod="get" { (lang::PREVIEW_BUTTON) }
                             button { (lang::COMMIT_BUTTON) }
                         }
                     }
@@ -800,8 +803,81 @@ impl EndPoint for ChangeAtomValue {
                 edit_state,
             } => match state.get_mut().replace_atom_value(index, Atom::from(text)) {
                 Ok(()) => web::response_redirection(&DisplayElement::url(index, &edit_state)),
-                Err(_) => web::response_empty_400(), //TODO give better information
+                Err(_) => web::response_empty_400(), //TODO better feedback for wouldmerge
             },
+        }
+    }
+}
+
+/// Replace an atom with a named abstract.
+enum AtomToNamedAbstract {
+    Get { index: Index, edit_state: EditState },
+    Post { index: Index, edit_state: EditState },
+}
+impl AtomToNamedAbstract {
+    fn url(index: Index, edit_state: &EditState) -> String {
+        web::to_path_and_query(format!("/atom_to_named_abstract/{}", index), edit_state)
+    }
+}
+impl EndPoint for AtomToNamedAbstract {
+    type State = State;
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
+        match (
+            r.method(),
+            remove_prefix(r.uri().path(), "/atom_to_named_abstract/"),
+        ) {
+            (&Method::GET, Some(index)) => Ok(FromRequestOk::Value(AtomToNamedAbstract::Get {
+                index: parse_index(index)?,
+                edit_state: web::from_query(r.uri().query())?,
+            })),
+            (&Method::POST, Some(index)) => Ok(FromRequestOk::Value(AtomToNamedAbstract::Post {
+                index: parse_index(index)?,
+                edit_state: web::from_query(r.uri().query())?,
+            })),
+            _ => Err(FromRequestError::NoMatch(r)),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        match self {
+            AtomToNamedAbstract::Get { index, edit_state } => {
+                let database = state.get();
+                let atom = match database.element(index) {
+                    Ok(element) => match element.cases() {
+                        ElementRef::Atom(a) => a,
+                        _ => return web::response_empty_400(),
+                    },
+                    Err(_) => return web::response_empty_404(),
+                };
+                let content = html! {
+                    h1.atom { (lang::ATOM_TO_NAMED_ABSTRACT_TITLE) }
+                    p {
+                        (lang::CURRENT_VALUE) " " (atom_link(atom, &edit_state))
+                    }
+                    form.hbox method="post" action=(AtomToNamedAbstract::url(index, &edit_state)) {
+                        button { (lang::COMMIT_BUTTON) }
+                    }
+                };
+                let nav = navigation_links(&edit_state, None);
+                let page = compose_wiki_page(lang::ATOM_TO_NAMED_ABSTRACT_TITLE, content, nav);
+                web::response_html(page)
+            }
+            AtomToNamedAbstract::Post { index, edit_state } => {
+                let database = &mut state.get_mut();
+                let name = match database.replace_atom_with_abstract(index) {
+                    Ok(atom) => atom,
+                    Err(_) => return web::response_empty_400(),
+                };
+                let is_named_atom = database.insert_atom(Atom::from(lang::NAMED_ATOM));
+                let name_atom = database.insert_atom(name);
+                let _naming_relation = database
+                    .insert_relation(Relation {
+                        subject: index,
+                        descriptor: is_named_atom,
+                        complement: Some(name_atom),
+                    })
+                    .expect("Data race on database");
+                web::response_redirection(&DisplayElement::url(index, &edit_state))
+            }
         }
     }
 }
@@ -836,17 +912,17 @@ mod lang {
 
     pub const ATOM_TEXT: ConstStr = PreEscaped("Texte");
     pub const CREATE_ATOM_NAV: ConstStr = PreEscaped("Atome...");
-    pub const CREATE_ATOM_TITLE: ConstStr = PreEscaped("Ajouter un atome...");
+    pub const CREATE_ATOM_TITLE: ConstStr = PreEscaped("Ajouter un atome");
 
     pub const CREATE_ABSTRACT_NAV: ConstStr = PreEscaped("Abstrait...");
-    pub const CREATE_ABSTRACT_TITLE: ConstStr = PreEscaped("Ajouter un élément abstrait...");
+    pub const CREATE_ABSTRACT_TITLE: ConstStr = PreEscaped("Ajouter un élément abstrait");
     pub const CREATE_ABSTRACT_NAME_PLACEHOLDER: ConstStr = PreEscaped("Nom optionel");
 
     pub const RELATION_SUBJECT: ConstStr = PreEscaped("Sujet");
     pub const RELATION_DESCRIPTOR: ConstStr = PreEscaped("Verbe");
     pub const RELATION_COMPLEMENT: ConstStr = PreEscaped("Objet");
     pub const CREATE_RELATION_NAV: ConstStr = PreEscaped("Relation...");
-    pub const CREATE_RELATION_TITLE: ConstStr = PreEscaped("Ajouter une relation...");
+    pub const CREATE_RELATION_TITLE: ConstStr = PreEscaped("Ajouter une relation");
     pub const CREATE_RELATION_MISSING: ConstStr = PreEscaped("Champ manquant !");
 
     pub const REMOVE_ELEMENT_NAV: ConstStr = PreEscaped("Supprimer");
@@ -856,7 +932,11 @@ mod lang {
 
     pub const CHANGE_ATOM_VALUE_NAV: ConstStr = PreEscaped("Changer");
     pub const CHANGE_ATOM_VALUE_TITLE: ConstStr = PreEscaped("Changer atome...");
-    pub const CHANGE_ATOM_VALUE_CURRENT: ConstStr = PreEscaped("Valeur actuelle :");
+    pub const CURRENT_VALUE: ConstStr = PreEscaped("Valeur actuelle :");
+
+    pub const ATOM_TO_NAMED_ABSTRACT_NAV: ConstStr = PreEscaped("En abstrait");
+    pub const ATOM_TO_NAMED_ABSTRACT_TITLE: ConstStr =
+        PreEscaped("Transformer atome en abstrait nommé");
 }
 
 fn css_class_name(element: Ref<Element>) -> &'static str {
@@ -971,6 +1051,7 @@ fn navigation_links(edit_state: &EditState, displayed: Option<Ref<Element>>) -> 
             @match displayed.value() {
                 Element::Atom(_) => {
                     a.atom href=(ChangeAtomValue::url(displayed.index(), edit_state)) { (lang::CHANGE_ATOM_VALUE_NAV) }
+                    a.atom href=(AtomToNamedAbstract::url(displayed.index(), edit_state)) { (lang::ATOM_TO_NAMED_ABSTRACT_NAV) }
                 },
                 _ => {},
             }

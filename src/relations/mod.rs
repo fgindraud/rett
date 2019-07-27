@@ -264,8 +264,7 @@ impl Database {
         Ok(element_data.value)
     }
 
-    /// Replace the value of an existing atom with another.
-    /// All relations are preserved.
+    /// Replace the value of an existing atom with another. Relations are preserved.
     /// The new value must not exist in the database already.
     pub fn replace_atom_value(&mut self, index: Index, new_atom: Atom) -> Result<(), Error> {
         if self.index_of_atom(&new_atom).is_some() {
@@ -283,6 +282,27 @@ impl Database {
         self.unregister_atom(index, &old_atom);
         self.register_atom(index, new_atom).unwrap();
         Ok(())
+    }
+
+    /// Replace an atom by an abstract. Relations are preserved.
+    pub fn replace_atom_with_abstract(&mut self, index: Index) -> Result<Atom, Error> {
+        let element_value = &mut self
+            .elements
+            .get_mut(index)
+            .ok_or(Error::InvalidIndex)?
+            .value;
+        match element_value {
+            Element::Atom(_) => (),
+            _ => return Err(Error::InvalidIndex),
+        };
+        let old_value = std::mem::replace(element_value, Element::Abstract);
+        match old_value {
+            Element::Atom(a) => {
+                self.unregister_atom(index, &a);
+                Ok(a)
+            }
+            _ => unreachable!(),
+        }
     }
 }
 
