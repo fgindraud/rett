@@ -40,9 +40,10 @@ pub fn run(
         service_fn(move |request| {
             // Move cloned rc ref in this scope.
             let handlers = [
+                web::end_point_handler::<DisplayElement>,
                 web::end_point_handler::<Homepage>,
                 web::end_point_handler::<ListAllElements>,
-                web::end_point_handler::<DisplayElement>,
+                web::end_point_handler::<SearchAtom>,
                 web::end_point_handler::<CreateAtom>,
                 web::end_point_handler::<CreateAbstract>,
                 web::end_point_handler::<CreateRelation>,
@@ -327,6 +328,67 @@ impl EndPoint for ListAllElements {
         };
         let nav = navigation_links(&self.edit_state, None);
         let page = compose_wiki_page(lang::ALL_ELEMENTS_TITLE, content, nav);
+        web::response_html(page)
+    }
+}
+
+/// Search by name in the list of atoms.
+struct SearchAtom {
+    pattern: Option<String>,
+    edit_state: EditState,
+}
+impl SearchAtom {
+    fn url(edit_state: &EditState) -> String {
+        web::to_path_and_query("/search/atom", edit_state)
+    }
+}
+impl EndPoint for SearchAtom {
+    type State = State;
+    fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
+        match (r.method(), r.uri().path()) {
+            (&Method::GET, "/search/atom") => Ok(FromRequestOk::Value(SearchAtom {
+                pattern: None,
+                edit_state: web::from_query(r.uri().query())?,
+            })),
+            (&Method::POST, "/search/atom") => {
+                let edit_state = web::from_query(r.uri().query())?;
+                web::with_post_entries(r, move |entries| {
+                    let pattern = entries.get("pattern").ok_or(web::Error::BadRequest)?;
+                    Ok(SearchAtom {
+                        pattern: Some(pattern.to_string()),
+                        edit_state,
+                    })
+                })
+            }
+            _ => Err(FromRequestError::NoMatch(r)),
+        }
+    }
+    fn generate_response(self, state: &State) -> Response<Body> {
+        let content = html! {
+            h1.atom { (lang::SEARCH_ATOM_TITLE) }
+            form.vbox method="post" action=(SearchAtom::url(&self.edit_state)) {
+                input type="text" name="pattern" required? placeholder=(lang::ATOM_TEXT)
+                    value=(match self.pattern.as_ref() {
+                        Some(s) => s.as_str(),
+                        None => "",
+                    });
+                button { (lang::COMMIT_BUTTON) }
+            }
+            @if let Some(pattern) = self.pattern {
+                @let database = state.get();
+                @let results = database.text_atom_fuzzy_matches(&pattern);
+                table {
+                    @for (atom, score) in results.iter().take(40) {
+                        tr {
+                            td { (score) }
+                            td { (atom_link(atom, &self.edit_state)) }
+                        }
+                    }
+                }
+            }
+        };
+        let nav = navigation_links(&self.edit_state, None);
+        let page = compose_wiki_page(lang::SEARCH_ATOM_TITLE, content, nav);
         web::response_html(page)
     }
 }
@@ -619,6 +681,9 @@ mod lang {
     pub const ALL_ELEMENTS_NAV: ConstStr = PreEscaped("Éléments");
     pub const ALL_ELEMENTS_TITLE: ConstStr = PreEscaped("Liste des éléments");
 
+    pub const SEARCH_ATOM_NAV: ConstStr = PreEscaped("Chercher");
+    pub const SEARCH_ATOM_TITLE: ConstStr = PreEscaped("Recherche par texte");
+
     pub const ATOM_TEXT: ConstStr = PreEscaped("Texte");
     pub const CREATE_ATOM_NAV: ConstStr = PreEscaped("Atome...");
     pub const CREATE_ATOM_TITLE: ConstStr = PreEscaped("Ajouter un atome...");
@@ -737,6 +802,7 @@ fn navigation_links(edit_state: &EditState, displayed: Option<Ref<Element>>) -> 
     html! {
         a href=(Homepage::url(edit_state)) { (lang::HOMEPAGE) }
         a href=(ListAllElements::url(edit_state)) { (lang::ALL_ELEMENTS_NAV) }
+        a.atom href=(SearchAtom::url(edit_state)) { (lang::SEARCH_ATOM_NAV) }
         a.atom href=(CreateAtom::url(edit_state)) { (lang::CREATE_ATOM_NAV) }
         a.abstract href=(CreateAbstract::url(edit_state)) { (lang::CREATE_ABSTRACT_NAV) }
         (selection_nav_link(lang::RELATION_SUBJECT, displayed, edit_state, |e| e.subject, |e,subject| EditState{ subject, ..*e }))
