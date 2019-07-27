@@ -15,12 +15,14 @@ pub use self::io::{read_database_from_file, write_database_to_file};
 pub enum Error {
     InvalidIndex,
     DuplicatedElement,
+    RemoveReferenced,
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Error::InvalidIndex => "invalid index".fmt(f),
             Error::DuplicatedElement => "duplicated element".fmt(f),
+            Error::RemoveReferenced => "trying to remove referenced element".fmt(f),
         }
     }
 }
@@ -121,7 +123,7 @@ impl Database {
             }
         }
     }
-    // Add a newly inserted Atom (at index) to tables. No-op on error.
+    /// Add a newly inserted Atom (at index) to tables. No-op on error.
     fn register_atom(&mut self, index: Index, atom: Atom) -> Result<(), Error> {
         match atom {
             Atom::Text(s) => {
@@ -131,6 +133,15 @@ impl Database {
                 }
                 self.text_atom_fuzzy_searcher.insert(&s, index);
                 Ok(())
+            }
+        }
+    }
+    /// Removes an existing atom from tables. Panics if atom does not exist.
+    fn unregister_atom(&mut self, index: Index, atom: &Atom) {
+        match atom {
+            Atom::Text(s) => {
+                self.text_atom_fuzzy_searcher.remove(s, &index);
+                self.index_of_text_atoms.remove(s).unwrap(); // Must be filled
             }
         }
     }
@@ -152,7 +163,7 @@ impl Database {
             }
         }
     }
-    // Add a newly inserted Relation (at index) to tables. No-op on error.
+    /// Add a newly inserted Relation (at index) to tables. No-op on error.
     fn register_relation(&mut self, index: Index, rel: Relation) -> Result<(), Error> {
         let indexes_valid = self.elements.valid(rel.subject)
             && self.elements.valid(rel.descriptor)
@@ -169,6 +180,23 @@ impl Database {
             self.elements[complement].complement_of.insert(index);
         }
         Ok(())
+    }
+    /// Removes a relation from tables. Panics if relation does not exist.
+    fn unregister_relation(&mut self, index: Index, rel: &Relation) {
+        self.elements[rel.subject]
+            .subject_of
+            .remove(&index)
+            .unwrap();
+        self.elements[rel.descriptor]
+            .descriptor_of
+            .remove(&index)
+            .unwrap();
+        if let Some(complement) = rel.complement {
+            self.elements[complement]
+                .complement_of
+                .remove(&index)
+                .unwrap();
+        }
     }
 
     /// Access element by index.
@@ -221,7 +249,16 @@ impl Database {
     }
 
     pub fn remove_element(&mut self, index: Index) -> Result<Element, Error> {
-        unimplemented!()
+        if self.element(index)?.is_referenced() {
+            return Err(Error::RemoveReferenced);
+        }
+        let element_data = self.elements.remove(index).unwrap();
+        match &element_data.value {
+            Element::Abstract => (),
+            Element::Atom(a) => self.unregister_atom(index, a),
+            Element::Relation(r) => self.unregister_relation(index, r),
+        }
+        Ok(element_data.value)
     }
 }
 
