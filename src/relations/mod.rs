@@ -248,6 +248,7 @@ impl Database {
         }
     }
 
+    /// Remove an existing unreference element. Return the element value.
     pub fn remove_element(&mut self, index: Index) -> Result<Element, Error> {
         if self.element(index)?.is_referenced() {
             return Err(Error::RemoveReferenced);

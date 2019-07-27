@@ -436,15 +436,15 @@ impl EndPoint for CreateAtom {
         match self {
             CreateAtom::Get { edit_state } => {
                 let content = html! {
-                                    h1.atom { (lang::CREATE_ATOM_TITLE) }
-                                    form.vbox method="post" action=(CreateAtom::url(&edit_state)) {
-                                        input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
-                                        div.hbox {
-                //                            button formmethod="get" { (lang::PREVIEW_BUTTON) }
-                                            button { (lang::COMMIT_BUTTON) }
-                                        }
-                                    }
-                                };
+                    h1.atom { (lang::CREATE_ATOM_TITLE) }
+                    form.vbox method="post" action=(CreateAtom::url(&edit_state)) {
+                        input type="text" name="text" required? placeholder=(lang::ATOM_TEXT);
+                        div.hbox {
+                            // button formmethod="get" { (lang::PREVIEW_BUTTON) }
+                            button { (lang::COMMIT_BUTTON) }
+                        }
+                    }
+                };
                 let nav = navigation_links(&edit_state, None);
                 let page = compose_wiki_page(lang::CREATE_ATOM_TITLE, content, nav);
                 web::response_html(page)
@@ -497,15 +497,15 @@ impl EndPoint for CreateAbstract {
         match self {
             CreateAbstract::Get { edit_state } => {
                 let content = html! {
-                                    h1.abstract { (lang::CREATE_ABSTRACT_TITLE) }
-                                    form.vbox method="post" action=(CreateAbstract::url(&edit_state)) {
-                                        input type="text" name="name" placeholder=(lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
-                                        div.hbox {
-                //                            button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
-                                            button { (lang::COMMIT_BUTTON) }
-                                        }
-                                    }
-                                };
+                    h1.abstract { (lang::CREATE_ABSTRACT_TITLE) }
+                    form.vbox method="post" action=(CreateAbstract::url(&edit_state)) {
+                        input type="text" name="name" placeholder=(lang::CREATE_ABSTRACT_NAME_PLACEHOLDER);
+                        div.hbox {
+                            // button name="preview" formmethod="get" { (lang::PREVIEW_BUTTON) }
+                            button { (lang::COMMIT_BUTTON) }
+                        }
+                    }
+                };
                 let nav = navigation_links(&edit_state, None);
                 let page = compose_wiki_page(lang::CREATE_ABSTRACT_TITLE, content, nav);
                 web::response_html(page)
@@ -639,10 +639,7 @@ impl EndPoint for CreateRelation {
     }
 }
 
-// Modes {
-// - one element (must be orphaned), page is preview, default
-// - recursive (no requirements): preview with list, revert if list changed
-// - recursive + orphans ?
+/// Remove a single element.
 struct RemoveElement {
     index: Index,
     edit_state: EditState,
@@ -658,6 +655,8 @@ impl RemoveElement {
     }
 }
 impl EndPoint for RemoveElement {
+    //TODO add recursive mode ?
+    //preview = list of elements + list of orphans with checkboxes
     type State = State;
     fn from_request(r: Request<Body>) -> Result<FromRequestOk<Self>, FromRequestError> {
         match (r.method(), remove_prefix(r.uri().path(), "/remove/")) {
