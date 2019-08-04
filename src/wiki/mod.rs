@@ -1022,7 +1022,7 @@ fn abstract_link(r: Ref<Abstract>, edit_state: &EditState) -> Markup {
 }
 fn relation_link(r: Ref<Relation>, edit_state: &EditState) -> Markup {
     html! {
-        a.relation href=(DisplayElement::url(r.index(), edit_state)) { (relation_name(r, 1)) }
+        a.relation href=(DisplayElement::url(r.index(), edit_state)) { (relation_name(r, 3)) }
     }
 }
 fn element_link(r: Ref<Element>, edit_state: &EditState) -> Markup {

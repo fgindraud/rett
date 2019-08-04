@@ -1,9 +1,8 @@
 Rett - Relation Editor and Tracking Tool
 ========================================
 
-Status
-------
+Model any data using a corpus of sentences.
 
-For now, wiki interface WIP.
-
-Visualisation as graph howto ?
+Model is usable, but data input is way too slow in wiki interface.
+Visualisation as graph useful later ?
+For RPG uses, replaced by wimd.
